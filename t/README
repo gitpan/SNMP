@@ -1,43 +1,4 @@
 
-mibload
-(save_descriptions, use_long_names) 
-  setmib
-  initMib
-  addMibDirs
-  addMibFiles
-  loadModules
-  unloadModules (todo)
-
-mib
- translateObj
- getType
- mapEnum
- SNMP::MIB::NODE
-
-session
-  connectivity
-  error handling
-  mib loading
-  parameters
-
-get
-(use_enums, sprint_val, long_names)
-  var formats
-  fget
-  multi varbinds
-  error reporting
-
-getnext
-
-set
-
-trap??
-
-async
-
-snmpv3
-
-
 This is the first stab at setting up comprehensive tests for
 SNMP-1.7 which look and act like regular perl5 test results.
 
@@ -58,8 +19,8 @@ BEGIN {
         @INC = '../lib' if -d '../lib';
     }
 }
-use Test;
-use SNMP 3.0;
+
+use SNMP 1.7;
 
 $SNMP::verbose = 0;
 $num = 0;  # Number of tests to run

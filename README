@@ -1,6 +1,6 @@
-	      The Perl5 'SNMP' Extension Module v3.0.0b1
-		      for the UCD SNMPv3 Library
-	       G.S. Marzot (gmarzot@nortelnetworks.com)
+		   Perl5 SNMP Extension Module v1.8.2
+		       for the UCD SNMP Library
+		G.S. Marzot (gmarzot@nortelnetworks.com)
 
 Contents:
    Introduction:
@@ -16,88 +16,78 @@ Contents:
 
 Introduction:
 
-This is a Perl5 extension module which provides a full featured SNMPv3
-protocol operation API. An interface to the MIB module parse-tree is
-also provided.  The SNMP module internals rely on the UCD SNMPv3
-library (ucd-snmp-4.x libsnmp). For information on the UCD SNMP
-library see the documentation provided with the UCD SNMP distribution
-or the ucd-snmp project web page: http://ucd-snmp.ucdavis.edu
+This is a Perl5 extension module which provides a full featured SNMP
+client side API.  The SNMP module internals rely on the UCD SNMP
+client library toolkit. The UCD SNMP library was originally based on
+version 2.1.2.1 of the CMU SNMP library but has incorporated many
+bugfixes and enhancements. For information on the UCD SNMP library see
+the documentation provided with the UCD SNMP distribution or the
+ucd-snmp project web page: http://ucd-snmp.ucdavis.edu
 
-(Note: In previous releases this module was compatible with both the
+(NOTE: In previous releases this module was compatible with both the
 UCD and CMU SNMP libraries. Starting with Perl5/SNMP-1.7 this module
 will *only* work with the UCD SNMP library due to dependence on new
 features)
 
 Availability:
 
-The most recent release of the Perl5 SNMP module can be found at the
-following ftp site (as well as the usual perl archives, CPAN):
-ftp://ftp-east.baynetworks.com/netman/snmp/perl5/SNMP.tar.gz
-
-The most recent release of the UCD SNMPv3(ucd-snmp-4.x) Libray can be
-found at: 
+The most recent release of the UCD SNMP Libray can be found at:
 ftp://ucd-snmp.ucdavis.edu
 
+The most recent release of the Perl5/SNMP module can be found at:
+ftp://ftp-east.baynetworks.com/netman/snmp/perl5/SNMP.tar.gz
+(as well as the usual perl archives, CPAN)
+
 Supported Platforms:
-	Win9x/NT
-	Linux 1.2.x, 2.x
+	SunOS 4.1.x
 	Solaris 2.x
+	Linux 1.2.x, 2.0.x
 	Many other UNIX variants
+	Win9x/NT
 
 Release Notes:
 
-SNMP module version 3.0.0b1 is being developed against UCD SNMP
-4.0.pre6. 3.0.0b1 is a temporary beta release - it is likely
-incomplete and/or buggy (as always your help is appreciated).
+SNMP version 1.8.1 is known to interoperate w/ ucd-snmp-3.5.3 thru
+3.6.2.  WARNING: ucd-snmp-3.6.1 has a memory bug which will cause
+problems when used with this module (upgrade to ucd-snmp-3.6.2).
 Compatibility with earlier or later versions of ucd-snmp is not
-guaranteed due to the dynamic nature of open software development :).
-
-the latest stable release is SNMP-1.8.1 and ucd-snmp-3.6.2.
-
-to get ucd-snmp-4.0pre6 to build on my linux RH6.0 system had to
-change agent/mibgroup/mibII/interfaces.c:#include <ioctls.h> to
-agent/mibgroup/mibII/interfaces.c:#include <bits/ioctls.h> also had to
-hand install snmplib/{scapi.h, keytools.h, snmpv3.h, transform_oids.h}
-
+guaranteed due to the dynamic nature of free software development :).
 
 Installation:
 
-Build and install the UCD SNMP package - see UCD SNMP README and
-INTSALL docs.
+build and install ucd-snmp
 
-Note: you should ensure that any previous ucd-snmp or cmu snmp
+note: you should ensure that any previous ucd-snmp or cmu snmp
 installation is located so that the wrong libsnmp or headers are not
 used by mistake).
-
-Unix:
 
 perl Makefile.PL
 make
 make test
 make install
 
-Win32: 
+Win32 
 
-(Note: only builds on NT as far as I know. requires VC++ 5.0-6.0, be
+(note: only builds on NT as far as I know. requires VC++ 5.0-6.0, be
        sure to run vcvars32.bat first)
 
-for ActiveState Perl  (tested with AS Perl5.005_03 (515))
+for ActiveState Perl  (tested with ASPerl5.005_03 (515))
 
 perl Makefile.PL CAPI=TRUE
 nmake
 nmake test
 nmake install
 
-for the older perl5.004_02 distribution by gsarathy
+for gsarathy's perl5.004_02
 
-perl Makefile.PL
+perl Makefile.PL CAPI=TRUE
 nmake
 nmake test
 nmake install
 
-Note: 'make test' requires that an agent is running to which you have
-read/write access. For the UCD SNMP agent (snmpd) this will involve
-setting up the snmpd.conf file with read-write access for the community chosen during the 'perl Makefile.PL' step ('private' by default).
+note: 'make test' requires that an agent is running to which you have
+read/write access. For the ucd-snmp snmpd this may involve setting up
+the snmpd.conf file with read-write access for 'private'
 
 Operational Description:
 
@@ -119,7 +109,7 @@ SNMP::Session
 public:
  DestHost    - default 'localhost', hostname or ip addr of SNMP agent
  Community   - default 'public', SNMP community string (used for both R/W)
- Version     - default '1', [2 (same as 2c), 2c, 3]
+ Version     - default '1', [2 (same as 2c), 2c, 3 (not implemented)]
  RemotePort  - default '161', allow remote UDP port to be overriden
  Timeout     - default '1000000', micro-seconds before retry
  Retries     - default '5', retries before failure
@@ -128,18 +118,6 @@ public:
                undef will be returned for all NOSUCH varbinds, when set
                to '0' this feature is disabled and the entire get request
                will fail on any NOSUCH error (applies to v1 only)
- SecName     - default 'initial', security name (v3)
- SecLevel    - default 'noAuthNoPriv', security level [noAuthNoPriv, 
-               authNoPriv, authPriv] (v3) 
- SecEngineId - default <none>, security engineID, will be probed if not 
-               supplied (v3)
- ContextEngineId - default <SecEngineId>, context engineID, will be
-                   probed if not supplied (v3)
- Context     - default '', context name (v3)
- AuthProto   - default 'MD5', authentication protocol [MD5, SHA] (v3)
- AuthPass    - default <none>, authentication passphrase
- PrivProto   - default 'DES', privacy protocol [DES] (v3)
- PrivPass    - default <none>, privacy passphrase (v3)
  VarFormats  - default 'undef', used by 'fget[next]', holds an hash
                reference of output value formatters, (e.g., {<obj> =>
                <sub-ref>, ... }, <obj> must match the <obj> and format
@@ -162,7 +140,7 @@ public:
                of session creation. set to non-zero to have return values
                for 'get' and 'getnext' methods formatted with the libraries
                sprint_value function. This will result in certain data types
-               being returned in non-canonical format Note: values returned
+               being returned in non-canonical format NOTE: values returned
                with this option set may not be appropriate for 'set' operations
                (see discussion of value formats in <vars> description section)
  UseEnums    - defaults to the value of SNMP::use_enums at time of session
@@ -200,7 +178,7 @@ methods:
                  - do SNMP GETNEXT, multiple <vars> formats accepted,
                    returns retrieved value(s), <vars> passed as arguments are
                    updated to indicate next lexicographical <obj>,<iid>,<val>,
-                   and <type> Note: simple string <vars>,(e.g., 'sysDescr.0')
+                   and <type> NOTE: simple string <vars>,(e.g., 'sysDescr.0')
                    form is not updated. If <callback> supplied method
                    will operate asyncronously
  fgetnext(<vars>[,<callback>])
@@ -298,7 +276,7 @@ Acceptable variable formats:
                    single attribute without constructing an SNMP::Varbind.
                    stored in a perl scalar, has the form '<tag>.<iid>',
                    (e.g., 'sysDescr.0'). for 'set' operations the value
-                   is passed as a second arg. Note: This argument form is
+                   is passed as a second arg. NOTE: This argument form is
                    not updated in get[next] operations as are the other forms.
 
 Acceptable callback formats:
@@ -315,11 +293,11 @@ Acceptable callback formats:
 callback will be called when response is received or timeout
 occurs. the last argument passed to callback will be a
 SNMP::VarList reference. In case of timeout the last argument 
-will be undef.
+will be undef
 
 SNMP package variables and functions:
 
- $SNMP::VERSION       - the current version specifier (e.g., 3.0)
+ $SNMP::VERSION       - the current version specifier (e.g., 1.8)
 
  $SNMP::auto_init_mib - default '1', set to 0 to disable automatic reading
                         of the MIB upon session creation. set to non-zero
@@ -341,7 +319,7 @@ SNMP package variables and functions:
  $SNMP::use_sprint_value - default '0', set to non-zero to enable formatting of
                         response values using the snmp libraries sprint_value
                         function. can also be set on a per session basis (see
-                        UseSprintValue) Note: returned values may not be
+                        UseSprintValue) NOTE: returned values may not be
                         suitable for 'set' operations
 
  $SNMP::use_enums     - default '0',set non-zero to return values as enums and
@@ -364,8 +342,7 @@ SNMP package variables and functions:
 
  %SNMP::MIB           - a tied hash to access parsed MIB information. After 
                         the MIB has been loaded this hash allows access to  
-                        to the parsed in MIB meta-data(the structure of the
-                        MIB (i.e., schema)). The hash returns blessed
+                        to the parsed in MIB meta-data. The hash returns 
                         references to SNMP::MIB::NODE objects which represent
                         a single MIB attribute. The nodes can be fetched with
                         multiple 'key' formats - the leaf name (e.g.,sysDescr)
@@ -400,7 +377,7 @@ SNMP package variables and functions:
                          loading MIBs indicated by environment variables (see
                          ucd mib_api docs). passing non-zero second arg
                          forces previous mib to be freed and replaced 
-                         (Note: second arg not working since freeing previous 
+                         (note: second arg not working since freeing previous 
                           Mib is more involved than before).
 
  &SNMP::initMib()     - calls library init_mib function if Mib not already
@@ -476,39 +453,39 @@ Exported SNMP utility functions
 &snmp_trap() - takes args of SNMP::TrapSession::new followed by those of 
                SNMP::TrapSession::trap
 
-Note: utility functions do not support async operation yet.
+note: utility functions do not support async operation yet.
 
 Trouble Shooting:
 
 If problems occur there are number areas to look at to narrow down the
 possibilities.
 
-The first step should be to test the UCD SNMP installation
-independently from the Perl5 SNMP interface.
+The first step should be to test the UCD installation independently from
+the Perl5/SNMP interface. 
 
-Try running the apps from the UCD SNMP distribution. 
+Try running the apps from the UCD distribution. 
 
-Make sure your agent (snmpd) is running and properly configured with
-read-write access for the community you are using.
+Make sure your agent is running and properly configured with
+read-write access for the community you are using
 
 Ensure that your MIBs are installed and enviroment variables are set
 appropriately (see man mib_api)
 
 Be sure to remove old ucd-snmp installations and ensure headers and
-libraries from old CMU installations are not being used by mistake.
+libraries from old CMU installations are not being used by mistake
 
 If the problem occurs during compilation/linking check that the snmp
-library being linked is actually the UCD SNMP library (there have been
-name conflicts with existing snmp libs).
+library being linked is actually the UCD library (there have been name
+conflicts with existing snmp libs). 
 
 Also check that the header files are correct and up to date. 
 
-Sometimes compiling the UCD SNMP library with
+Sometimes compiling the UCD snmp library with
 'position-independent-code' enabled is required (HPUX specifically).
 
-If you cannot resolve the problem you can post to
-comp.lang.perl.modules or email me at gmarzot@nortelnetworks.com
-and/or ucd-snmp-coders@ucd-snmp.ucdavis.edu.
+if you cannot resolve the problem you can email me at
+gmarzot@nortelnetworks.com and/or ucd-snmp-coders@ucd-snmp.ucdavis.edu.
+and maybe I can help.
 
 please give sufficient information to analyze the problem (OS type,
 versions for OS/Perl/UCD/compiler, complete error output, etc.)
@@ -546,15 +523,19 @@ bugs, comments, questions to gmarzot@nortelnetworks.com
 ------
 History:
 
+Bugs fixed and changes in 1.8.2 
+
+1) fixed mib parse problem - "Bad operator(DEFINITIONS): At line 1 in..."
+
 Bugs fixed and changes in 1.8.1
 
 1) updated docs
 
-2) fixed #defines from MAX_NAME_LEN to MAX_OID_LEN (mslifcak)
+2) fixed #defines from AMX_NAME_LEN to MAX_OID_LEN (mslifcak)
 
 3) reverted __tag2oid to use read_objid rather than get_node. this
 gives full name resolution provided by libsnmp and no longer creates
-problems on failure since 3.6.2 removes the call to 'exit' in
+problesm on failure since 3.6.2 removes the call to 'exit' in
 read_objid
 
 4) fixed Makefile.PL to use win32 'type' vs. 'cat'
