@@ -7,7 +7,7 @@
 #     modify it under the same terms as Perl itself.
 
 package SNMP;
-$VERSION = '3.1.0';   # current release version number
+$VERSION = '4.2.0';   # current release version number
 
 require Exporter;
 require DynaLoader;
@@ -73,6 +73,7 @@ bootstrap SNMP;
 
 # Package variables
 tie $SNMP::debugging, SNMP::DEBUGGING;
+tie $SNMP::debug_internals, SNMP::DEBUG_INTERNALS;
 tie $SNMP::dump_packet, SNMP::DUMP_PACKET;
 tie %SNMP::MIB, SNMP::MIB;
 tie $SNMP::save_descriptions, SNMP::MIB::SAVE_DESCR;
@@ -91,6 +92,11 @@ $use_enums = 0; # non-zero to return integers as enums and allow sets
                 # using enums where appropriate - integer data will
                 # still be accepted for set operations
                 # may also be set on a per session basis (see UseEnums)
+$use_numeric = 0; # non-zero to return object tags as numeric OID's instead
+                  # of converting to textual representations.  use_long_names,
+                  # if non-zero, returns the entire OID, otherwise, return just
+                  # the label portion.  Probably want to use_long_names in most
+                  # cases.
 %MIB = ();      # tied hash to access libraries internal mib tree structure
                 # parsed in from mib files
 $verbose = 0;   # controls warning/info output of SNMP module,
@@ -103,6 +109,9 @@ $dump_packet = 0; # non-zero to globally enable libsnmp dump_packet output.
                   # is also enabled when $debugging >= 2
 $save_descriptions = 0; #tied scalar to control saving descriptions during
                # mib parsing - must be set prior to mib loading
+$best_guess = 0;  # determine whether or not to enable best-guess regular
+                  # expression object name translation
+$timestamp_vars = 0; # Add a timestamp to each Varbind
 
 sub setMib {
 # loads mib from file name provided
@@ -172,10 +181,12 @@ sub translateObj {
    return undef if not defined $obj;
    my $res;
    if ($obj =~ /^\.?(\d+\.)*\d+$/) {
-      $res = SNMP::_translate_obj($obj,1,$long_names,$SNMP::auto_init_mib);
-   } elsif ($obj =~ /(\w+)(\.\d+)*$/) {
-      $res = SNMP::_translate_obj($1,0,$long_names,$SNMP::auto_init_mib);
-      $res .= $2 if defined $res and defined $2;
+      $res = SNMP::_translate_obj($obj,1,$long_names,$SNMP::auto_init_mib,0);
+   } elsif ($obj =~ /(\.\d+)*$/ && $SNMP::best_guess == 0) {
+      $res = SNMP::_translate_obj($`,0,$long_names,$SNMP::auto_init_mib,0);
+      $res .= $& if defined $res and defined $&;
+   } elsif ($SNMP::best_guess) {
+      $res = SNMP::_translate_obj($obj,0,$long_names,$SNMP::auto_init_mib,$SNMP::best_guess);
    }
 
    return($res);
@@ -288,6 +299,10 @@ sub MainLoop {
     my $time_sec = ($time ? int $time : 0);
     my $time_usec = ($time ? int(($time-$time_sec)*1000000) : 0);
     SNMP::_main_loop($time_sec,$time_usec,$callback);
+}
+
+sub finish {
+    SNMP::_mainloop_finish();
 }
 
 sub reply_cb {
@@ -440,6 +455,8 @@ sub new {
    $this->{UseLongNames} ||= $SNMP::use_long_names;
    $this->{UseSprintValue} ||= $SNMP::use_sprint_value;
    $this->{UseEnums} ||= $SNMP::use_enums;
+   $this->{UseNumeric} ||= $SNMP::use_numeric;
+   $this->{TimeStamp} ||= $SNMP::timestamp_vars;
 
    bless $this, $type;
 }
@@ -477,6 +494,8 @@ sub update {
    $this->{UseLongNames} ||= $SNMP::use_long_names;
    $this->{UseSprintValue} ||= $SNMP::use_sprint_value;
    $this->{UseEnums} ||= $SNMP::use_enums;
+   $this->{UseNumeric} ||= $SNMP::use_numeric;
+   $this->{TimeStamp} ||= $SNMP::timestamp_vars;
 
    SNMP::_update_session($this->{Version},
 		 $this->{Community},
@@ -503,7 +522,7 @@ sub set {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|(?:\w+(?:\-*\w+)+))\.?(.*)$/);
      my $val = shift;
      $varbind_list_ref = [[$tag, $iid, $val]];
    }
@@ -525,7 +544,7 @@ sub get {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|(?:\w+(?:\-*\w+)+))\.?(.*)$/);
      $varbind_list_ref = [[$tag, $iid]];
    }
 
@@ -549,7 +568,7 @@ sub fget {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|(?:\w+(?:\-*\w+)+))\.?(.*)$/);
      $varbind_list_ref = [[$tag, $iid]];
    }
 
@@ -580,7 +599,7 @@ sub getnext {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|(?:\w+(?:\-*\w+)+))\.?(.*)$/);
      $varbind_list_ref = [[$tag, $iid]];
    }
 
@@ -604,7 +623,7 @@ sub fgetnext {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|(?:\w+(?:\-*\w+)+))\.?(.*)$/);
      $varbind_list_ref = [[$tag, $iid]];
    }
 
@@ -637,7 +656,7 @@ sub getbulk {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|(?:\w+(?:\-*\w+)+))\.?(.*)$/);
      $varbind_list_ref = [[$tag, $iid]];
    }
 
@@ -648,6 +667,49 @@ sub getbulk {
    return(wantarray() ? @res : $res[0]);
 }
 
+sub bulkwalk {
+   my $this = shift;
+   my $nonrepeaters = shift;
+   my $maxrepetitions = shift;
+   my $vars = shift;
+   my ($varbind_list_ref, @res);
+
+   if (ref($vars) =~ /SNMP::VarList/) {
+      $varbind_list_ref = $vars;
+   } elsif (ref($vars) =~ /SNMP::Varbind/) {
+      $varbind_list_ref = [$vars];
+   } elsif (ref($vars) =~ /ARRAY/) {
+      $varbind_list_ref = [$vars];
+      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
+   } else {
+      my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
+      $varbind_list_ref = [[$tag, $iid]];
+   }
+
+   if (scalar @$varbind_list_ref == 0) {
+      $this->{ErrorNum} = SNMP::constant("SNMPERR_GENERR", 0);
+      $this->{ErrorStr} = "cannot bulkwalk() empty variable list";
+      return undef;
+   }
+   if (scalar @$varbind_list_ref < $nonrepeaters) {
+      $this->{ErrorNum} = SNMP::constant("SNMPERR_GENERR", 0);
+      $this->{ErrorStr} = "bulkwalk() needs at least $nonrepeaters varbinds";
+      return undef;
+   }
+
+   my $cb = shift;
+   @res = SNMP::_bulkwalk($this, $nonrepeaters, $maxrepetitions, 
+						$varbind_list_ref, $cb);
+
+   # Return, in list context, a copy of the array of arrays of Varbind refs.
+   # In scalar context, return either a reference to the array of arrays of
+   # Varbind refs, or the request ID for an asynchronous bulkwalk.  This is
+   # a compromise between the getbulk()-ish return, and the more useful array
+   # of arrays of Varbinds return from the synchronous bulkwalk().
+   #
+   return @res if (wantarray());
+   return defined($cb) ? $res[0] : \@res;
+}
 
 %trap_type = (coldStart => 0, warmStart => 1, linkDown => 2, linkUp => 3,
 	      authFailure => 4, egpNeighborLoss => 5, specific => 6 );
@@ -707,11 +769,15 @@ sub inform {
 # $sess->inform(uptime => 1234,
 #             oid => 'coldStart',
 #             [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
-#                                                          # always last
+#                                                          # then callback
+                                                           # always last
 
 
    my $this = shift;
-   my $vars = pop if ref($_[$#_]); # last arg may be varbind or varlist
+   my $vars;
+   my $cb;
+   $cb = pop if ref($_[$#_]) eq 'CODE'; # last arg may be code
+   $vars = pop if ref($_[$#_]); # varbind or varlist
    my %param = @_;
    my ($varbind_list_ref, @res);
 
@@ -726,8 +792,9 @@ sub inform {
 
    my $trap_oid = $param{oid} || $param{trapoid};
    my $uptime = $param{uptime} || SNMP::_sys_uptime();
+
    if($this->{Version} eq '3') {
-     @res = SNMP::_inform($this, $uptime, $trap_oid, $varbind_list_ref);
+     @res = SNMP::_inform($this, $uptime, $trap_oid, $varbind_list_ref, $cb);
    } else {
      warn("error:inform: This version doesn't support the command\n");
    }
@@ -755,6 +822,7 @@ $tag_f = 0;
 $iid_f = 1;
 $val_f = 2;
 $type_f = 3;
+$time_f = 4;
 
 sub new {
    my $type = shift;
@@ -778,6 +846,24 @@ sub val {
 sub type {
   $_[0]->[$type_f];
 }
+
+sub name {
+   if (defined($_[0]->[$iid_f]) && ($_[0]->[$iid_f] =~ m/^[0-9]+$/)) {
+      return $_[0]->[$tag_f] . "." . $_[0]->[$iid_f];
+   }
+
+   return $_[0]->[$tag_f];
+}
+
+sub stamp {
+   $_[0]->[$time_f];
+}
+
+sub fmt {
+    my $self = shift;
+    return $self->name . " = \"" . $self->val . "\" (" . $self->type . ")";
+}
+
 
 #sub DESTROY {
 #    print "SNMP::Varbind::DESTROY($_[0])\n";
@@ -822,6 +908,21 @@ sub DELETE {
     $SNMP::verbose = 0;
     SNMP::_set_debugging(0);
     $SNMP::dump_packet = 0;
+    ${$_[0]} = undef;
+}
+
+package SNMP::DEBUG_INTERNALS;		# Controls SNMP.xs debugging.
+sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }
+
+sub FETCH { ${$_[0]}; }
+
+sub STORE {
+    SNMP::_debug_internals($_[1]);
+    ${$_[0]} = $_[1];
+}
+
+sub DELETE {
+    SNMP::_debug_internals(0);
     ${$_[0]} = undef;
 }
 
@@ -881,6 +982,7 @@ my %node_elements =
      parent => 0,   # parent node
      children => 0, # array reference of children nodes
      indexes => 0,  # returns array of column labels
+     varbinds => 0, # returns array of trap/notification varbinds
      nextNode => 0, # next lexico node (BUG! does not return in lexico order)
      type => 0,     # returns simple type (see getType for values)
      access => 0,   # returns ACCESS (ReadOnly, ReadWrite, WriteOnly,
@@ -892,6 +994,8 @@ my %node_elements =
      units => 0,    # returns UNITS
      hint => 0,     # returns HINT
      enums => 0,    # returns hash ref {tag => num, ...}
+     ranges => 0,    # returns hash ref {low => num, high => num}
+     defaultValue => 0,   # returns default value
      description => 0, # returns DESCRIPTION ($SNMP::save_descriptions must
                     # be set prior to MIB initialization/parsing
     );
@@ -954,7 +1058,7 @@ SNMP - The Perl5 'SNMP' Extension Module v3.1.0 for the UCD SNMPv3 Library
  do {
     $val = $sess->getnext($vb);
     print "@{$vb}\n";
- until ($sess->{ErrorNum});
+ } until ($sess->{ErrorNum});
  ...
  $SNMP::save_descriptions = 1;
  SNMP::initMib(); # assuming mib is not already loaded
@@ -1096,6 +1200,23 @@ creation. set to non-zero to have integer return values
 converted to enumeration identifiers if possible, these values
 will also be acceptable when supplied to 'set' operations
 
+=item UseNumeric
+
+defaults to the value of SNMP::use_numeric at time of session
+creation. set to non-zero to have <tags> for get methods returned
+as numeric OID's rather than descriptions.  if UseLongNames is
+set, returns the entire OID as given, otherwise just the last two
+octets.
+
+=item TimeStamp
+
+defaults to the value of SNMP::timestamp_vars at time of session
+creation. set to non-zero to have an additional element added to
+each Varbind containing the time(2) timestamp.  Reference this
+timestamp through the $varbind_ref->stamp() method.  Do not modify
+the value of a timestamp -- it is shared between all variables
+received at the same time.
+
 =item ErrorStr
 
 read-only, holds the error message assoc. w/ last request
@@ -1182,6 +1303,53 @@ next lexico instance is fetched for the first n Varbinds
 as defined by <non-repeaters>. For remaining Varbinds,
 the m lexico instances are retrieved each of the remaining
 Varbinds, where m is <max-repeaters>.
+
+=item $sess->bulkwalk(E<lt>non-repeatersE<gt>, E<lt>max-repeatersE<gt>, E<lt>varsE<gt> [,E<lt>callbackE<gt>])
+
+Do a "bulkwalk" of the list of Varbinds.  This is done by
+sending a GETBULK request (see getbulk() above) for the
+Varbinds.  For each requested variable, the response is
+examined to see if the next lexico instance has left the
+requested sub-tree.  Any further instances returned for
+this variable are ignored, and the walk for that sub-tree
+is considered complete.
+
+If any sub-trees were not completed when the end of the
+responses is reached, another request is composed, consisting
+of the remaining variables.  This process is repeated until
+all sub-trees have been completed, or too many packets have
+been exchanged (to avoid loops).
+
+The bulkwalk() method returns an array containing an array of
+Varbinds, one for each requested variable, in the order of the
+variable requests.  Upon error, bulkwalk() returns undef and
+sets $sess->ErrorStr and $sess->ErrorNum.  If a callback is
+supplied, bulkwalk() returns the SNMP request id, and returns
+immediately.  The callback will be called with the supplied
+argument list and the returned variables list.
+
+Note: Because the client must "discover" that the tree is
+complete by comparing the returned variables with those that
+were requested, there is a potential "gotcha" when using the
+max-repeaters value.  Consider the following code to print a
+list of interfaces and byte counts:
+
+    $numInts = $sess->get('ifNumber.0');
+    ($desc, $in, $out) = $sess->bulkwalk(0, $numInts,
+		  [['ifDescr'], ['ifInOctets'], ['ifOutOctets']]);
+
+    for $i (0..($numInts - 1)) {
+        printf "Interface %4s: %s inOctets, %s outOctets\n",
+                  $$desc[$i]->val, $$in[$i]->val, $$out[$i]->val;
+    }
+
+This code will produce *two* requests to the agent -- the first
+to get the interface values, and the second to discover that all
+the information was in the first packet.  To get around this,
+use '$numInts + 1' for the max_repeaters value.  This asks the
+agent to include one additional (unrelated) variable that signals
+the end of the sub-tree, allowing bulkwalk() to determine that
+the request is complete.
 
 =back
 
@@ -1396,6 +1564,14 @@ If no args suplied this function enters an infinite loop
 so program must be exited in a callback or externally
 interupted. If <timeout(sic)
 
+=item &SNMP::finish()
+
+This function, when called from an SNMP::MainLoop() callback
+function, will cause the current SNMP::MainLoop() to return
+after the callback is completed.  finish() can be used to 
+terminate an otherwise-infinite MainLoop.  A new MainLoop()
+instance can then be started to handle further requests.
+
 =back
 
 =head1 SNMP package variables and functions
@@ -1443,6 +1619,22 @@ default '0',set non-zero to return values as enums and
 allow sets using enums where appropriate. integer data
 will still be accepted for set operations. can also be
 set on a per session basis (see UseEnums)
+
+=item $SNMP::use_numeric
+
+default to '0',set to non-zero to have <tags> for 'get'
+methods returned as numeric OID's rather than descriptions.
+if UseLongNames is set, returns the entire OID as given,
+otherwise just the last two octets. setting 'UseLongNames'
+is highly recommended.  Set on a per-session basis (see
+UseNumeric).
+
+=item $SNMP::timestamp_vars
+
+defaults to 0, set to non-zero to have an additional element
+added to each Varbind containing the time(2) timestamp.
+Reference the timestamps through the $varbind_ref->stamp()
+object method.
 
 =item $SNMP::save_descriptions
 
@@ -1554,6 +1746,10 @@ returns HINT
 =item enums
 
 returns hash ref {tag => num, ...}
+
+=item ranges
+
+returns array ref [[low1, high1], [low2, high2], ...]
 
 =item description
 

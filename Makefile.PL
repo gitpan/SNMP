@@ -1,6 +1,7 @@
 use ExtUtils::MakeMaker;
 require 5;
 use Config;
+use Getopt::Long;
 
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
 # the contents of the Makefile that is written.
@@ -31,9 +32,12 @@ sub InitMakeParams {
 	$snmp_link_lib = 'snmp';
 	$sep = '/';
     }
-    my $inc_path1 = "${sep}usr${sep}local${sep}include";
+    $prefix="${sep}usr${sep}local";
+    GetOptions("NET-SNMP-PATH=s" => \$prefix);
+
+    my $inc_path1 = "${prefix}${sep}include";
     my $inc_path2 = "${sep}usr${sep}include";
-    my $lib_path1 = "${sep}usr${sep}local${sep}lib";
+    my $lib_path1 = "${prefix}${sep}lib";
     my $lib_path2 = "${sep}usr${sep}lib";
 
     my @IncludeFiles = qw[ucd-snmp/ucd-snmp-config.h
@@ -66,6 +70,8 @@ sub InitMakeParams {
     $Params{LIBS} = "-L$LibDir -l$snmp_link_lib $ssl_link";
     $Params{INC}  = "-I$IncludeDir";
     $Params{H}    = \@IncludeFiles;
+    $Params{LDFLAGS} = "-L$LibDir $Config{ldflags}";
+    $Params{LDDLFLAGS} = "-L$LibDir $Config{lddlflags}";
 
     return(%Params);
 }
@@ -87,10 +93,10 @@ sub find_files {
 sub GetTestInfo {
     my $sep = ($^O =~ /win32/i ? '\\' : '/');
     my $info_file = "t${sep}snmptest.cmd";
-    my $snmpd_path1 = "${sep}usr${sep}local${sep}sbin";
+    my $snmpd_path1 = "${prefix}${sep}sbin";
+    my $mibdir = "${prefix}${sep}share${sep}snmp${sep}mibs";
     my $snmpd_path2 = "${sep}usr${sep}sbin";
     my $snmpd_path3 = "${sep}usr${sep}bin";
-    return if -e $info_file;
     open(H, ">$info_file") || die "Error: could not open file '$info_file'($!)";
     if($^O =~ /win32/i) {
 #you are using WIN 32
@@ -107,32 +113,37 @@ snmptest.cmd file, make test will use those data for testing.
 WIN32
     ;
 
-         $host = prompt("Please enter the host IP address/host name: ");
+         $host = prompt("Please enter the host IP address/host name: ", "localhost");
          print H "HOST => $host\n";
-         $agent_port = prompt("Please enter the agent port number: ");
+         $agent_port = prompt("Please enter the agent port number: ", 161);
          print H "AGENT_PORT => $agent_port\n";
-         $trap_port = prompt("Please enter the trap port number: ");
+         $trap_port = prompt("Please enter the trap port number: ", 162);
          print H "TRAP_PORT => $trap_port\n";
+         $mibdir = prompt("Please enter the MIB directory: ", "/usr/mibs");
+         print H "MIBDIR => $mibdir\n";
     } else {
 # you are using UNIX
-# remember to add snmptrapd too
+    my $mibdir = find_files(["UCD-SNMP-MIB.txt"],[$mibdir]);
     my $snmpd = find_files(["snmpd"], [$snmpd_path1, $snmpd_path2]);
     my $snmptrapd = find_files(["snmptrapd"], [$snmpd_path1, $snmpd_path2]);
 
-    $snmpd = prompt("Unable to locate \"snmpd\". Please enter the path: ")
-	unless $snmpd;
-    $snmptrapd = prompt("Unable to locate \"snmptrapd\". Please enter the path: ")
-	unless $snmptrapd;
-
+    $mibdir ||= prompt("Unable to locate the MIBs, Please enter the path: ",
+		       $snmpd_path1);
+    $snmpd ||= prompt("Unable to locate \"snmpd\". Please enter the path: ",
+		      $snmpd_path1);
+    $snmptrapd ||=
+	prompt("Unable to locate \"snmptrapd\". Please enter the path: ",
+	       $snmpd_path1);
 
     $snmpd =~ s/($sep)?(snmpd)?$/${sep}snmpd/;
     $snmptrapd =~ s/($sep)?(snmptrapd)?$/${sep}snmptrapd/;
+    print H "SNMPD => $snmpd\n";
+    print H "SNMPTRAPD => $snmptrapd\n";
+    print H "MIBDIR => $mibdir\n";
 
     if (-e $snmpd and -r $snmpd) {
 	if (not -x $snmpd) {
 	    warn("Error: $snmpd not executable. 'make test' will not work.\n");
-	} else {
-	    print H "SNMPD => $snmpd\n";
 	}
     } else {
 	warn("Error: $snmpd does not exist or is unreadable. 'make test' will not work.\n");
@@ -141,8 +152,6 @@ WIN32
     if (-e $snmptrapd and -r $snmptrapd) {
 	if (not -x $snmptrapd) {
 	    warn("Error: $snmptrapd not executable. 'make test' will not work.\n");
-	} else {
-	    print H "SNMPTRAPD => $snmptrapd\n";
 	}
     } else {
 	warn("Error: $snmptrapd does not exist or is unreadable. 'make test' will not work.\n");
