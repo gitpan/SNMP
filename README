@@ -95,10 +95,10 @@ public:
  RemotePort  - default '161', allow remote UDP port to be overriden
  Timeout     - default '1000000', micro-seconds before retry
  Retries     - default '5', retries before failure
- RetryNoSuch - default '1', 'get' request NOSUCH errors in the pdu will
+ RetryNoSuch - default '0', if enabled NOSUCH errors in 'get' pdus will
                be repaired, removing the varbind in error, and resent -
-               undef will be returned for all NOSUCH varbinds, setting
-               to '0' disables this feature and the entire get request
+               undef will be returned for all NOSUCH varbinds, when set
+               to '0' this feature is disabled and the entire get request
                will fail on any NOSUCH error (applies to v1 only)
  VarFormats  - default 'undef', used by 'fget[next]', holds an hash
                reference of output value formatters, (e.g., {<obj> =>
@@ -486,6 +486,7 @@ Doug Kingston
 Jacques Vidrine
 Carl Jacobsen
 Wayne Marquette
+Scott Schumate
 Perl5 Porters
 
 Apologies to any/all who's patch/feature/request was not mentioned or
@@ -501,7 +502,10 @@ History:
 
 Bugs fixed and changes in 1.8
 
-1) added async API
+1) added async API (async api should be considered late alpha -
+   potential changes are most likely in the event loop integration
+   area - would like to integrate with Event.pm - also mechanism for
+   indicating timeout to callback is required)
 
 2) added trap generation API (implemented v1 traps only for now)
 
@@ -544,6 +548,11 @@ Bugs fixed and changes in 1.8
 
 18) getType() supports all tag formats now
 
+19) fixed bug when setting values of type OBJID (thanks Scott Schumate)
+
+20) *WARNING* RetryNoSuch in session creation had a bug which prevented
+    it from being disbaled. It now defaults to being disabled - this may
+    break code *WARNING*
 
 
 Bugs fixed and changes in 1.7

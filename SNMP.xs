@@ -669,10 +669,11 @@ UINT:
 
       case TYPE_OBJID:
         vars->type = ASN_OBJECT_ID;
+        vars->val_len = MAX_OID_LEN;
         read_objid(val, oidbuf, &(vars->val_len));
-	vars->val.objid = (oid *)malloc(vars->val_len * sizeof(oid));
-	bcopy((char *)oidbuf, (char *)vars->val.objid,
-	      vars->val_len * sizeof(oid));
+        vars->val_len *= sizeof(oid);
+	vars->val.objid = (oid *)malloc(vars->val_len);
+	bcopy((char *)oidbuf, (char *)vars->val.objid,vars->val_len);
         break;
 
       default:
@@ -2080,9 +2081,10 @@ snmp_main_loop()
            tvp = &timeout;
            timerclear(tvp);
            snmp_select_info(&numfds, &fdset, tvp, &block);
-     /*  printf("post-select: numfds = %ld, block = %ld\n", numfds, block);*/
+     printf("pre-select: numfds = %ld, block = %ld\n", numfds, block);
            if (block == 1) tvp = NULL; /* block without timeout */
            fd_count = select(numfds, &fdset, 0, 0, tvp);
+     printf("post-select: numfds = %ld, block = %ld\n", numfds, block);
            if (fd_count > 0) {
               snmp_read(&fdset);
            } else switch(fd_count) {
@@ -2204,7 +2206,7 @@ snmp_mib_node_FETCH(tp_ref, key)
                  XPUSHs(sv_2mortal(newSVpv(str_buf,0)));
                  XPUSHs(sv_2mortal(newSViv((IV)tp)));
                  PUTBACK ;
-                 pp_tie();
+                 pp_tie(ARGS);
                  SPAGAIN ;
                  FREETMPS ;
                  LEAVE ;
