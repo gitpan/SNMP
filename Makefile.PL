@@ -40,7 +40,7 @@ my $lib_path2 = "${sep}usr${sep}local${sep}lib";
 my @IncludeFiles = qw[asn1.h mib.h parse.h snmp.h snmp_api.h 
 		      snmp_client.h snmp_impl.h];
 
-my @IncludeDirs = ($inc_path1, $inc_path2, $inc_path3);
+my @IncludeDirs = ($inc_path3, $inc_path2, $inc_path1);
 
 my $IncludeDir = find_files(\@IncludeFiles,\@IncludeDirs) ||
     prompt("Where are the $snmp_lib include files?","$inc_path3");

@@ -56,6 +56,9 @@ DLL_IMPORT extern struct tree *Mib;
 #define MAX_TYPE_NAME_LEN 16
 #define STR_BUF_SIZE 1024
 
+typedef struct snmp_session SnmpSession;
+typedef struct tree SnmpMibNode;
+
 static int __is_numeric_oid _((char*));
 static int __is_leaf _((struct tree*));
 static int __translate_appl_type _((char*));
@@ -67,6 +70,8 @@ static int __scan_num_objid _((char *, oid *, int *));
 static int __get_type_str _((int, char *));
 static int __get_label_iid _((char *, char **, char **, int));
 static int __oid_cmp _((oid *, int, oid *, int));
+static int __tp_sprint_num_objid _((char*,SnmpMibNode *));
+static SnmpMibNode * __get_next_mib_node _((SnmpMibNode *));
 static struct tree * __oid2tp _((oid*, int, struct tree *, int*));
 static struct tree * __tag2oid _((char *, char *, oid  *, int  *, int *));
 static int __concat_oid_str _((oid *, int *, char *));
@@ -79,9 +84,6 @@ static int __send_sync_pdu _((struct snmp_session *, struct snmp_pdu *,
 #define USE_LONG_NAMES 0x02
 #define FAIL_ON_NULL_IID 0x01
 #define NO_FLAGS 0x00
-
-typedef struct snmp_session SnmpSession;
-typedef struct tree SnmpMibNode;
 
 static int __is_numeric_oid (oidstr)
 char* oidstr;
@@ -98,6 +100,18 @@ struct tree* tp;
 {
    char buf[MAX_TYPE_NAME_LEN];
    return (tp && __get_type_str(tp->type,buf));
+}
+
+static SnmpMibNode* __get_next_mib_node (tp)
+SnmpMibNode* tp;
+{
+   if (tp->child_list) return(tp->child_list);
+   if (tp->next_peer) return(tp->next_peer);
+   if (!tp->parent) return(NULL);
+   for (tp = tp->parent; !tp->next_peer; tp = tp->parent) {
+      if (!tp->parent) return(NULL);
+   }
+   return(tp->next_peer);
 }
 
 static int
@@ -185,6 +199,8 @@ int flag;
 {
    int len = 0;
    u_char* ip;
+   struct enum_list *ep;
+
 
    buf[0] = '\0';
    if (flag == USE_SPRINT_VALUE) {
@@ -194,9 +210,15 @@ int flag;
      switch (var->type) {
         case ASN_INTEGER:
            if (flag == USE_ENUMS) {
-	      sprint_value(buf, var->name, var->name_length, var);
-              len = strlen(buf);
-           } else {
+              for(ep = tp->enums; ep; ep = ep->next) {
+                 if (ep->value == *var->val.integer) {
+                    strcpy(buf, ep->label);
+                    len = strlen(buf);
+                    break;
+                 }
+              }
+           } 
+           if (!len) {
               sprintf(buf,"%ld", *var->val.integer);
               len = strlen(buf);
            }
@@ -253,6 +275,21 @@ int len;
 	buf += strlen(buf);
    }
    return SUCCESS;
+}
+
+static int __tp_sprint_num_objid (buf, tp)
+char *buf;
+SnmpMibNode *tp;
+{
+   oid newname[MAX_OID_LEN], *op;
+   int newname_len = 0;
+   /* code taken from get_node in snmp_client.c */
+   for (op = newname + MAX_OID_LEN - 1; op >= newname; op--) {
+      *op = tp->subid;
+      tp = tp->parent;
+      if (tp == NULL) break;
+   }
+   return __sprint_num_objid(buf, op, newname + MAX_OID_LEN - op);
 }
 
 static int __scan_num_objid (buf, objid, len)
@@ -900,6 +937,50 @@ snmp_new_session(version, community, peer, port, retries, timeout)
         RETVAL
 
 
+SnmpSession *
+snmp_update_session(sess_ref, version, community, peer, port, retries, timeout)
+        SV *	sess_ref
+        char *	version
+        char *	community
+        char *	peer
+        int	port
+        int	retries
+        int	timeout
+	CODE:
+	{
+           SV **sess_ptr_sv;
+	   SnmpSession *ss;
+           int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
+
+           sess_ptr_sv = hv_fetch((HV*)SvRV(sess_ref), "SessPtr", 7, 1);
+           ss = (SnmpSession *)SvIV((SV*)SvRV(*sess_ptr_sv));
+
+           if (!ss) goto update_end;
+
+           if (!strcmp(version, "1")) {
+		ss->version = SNMP_VERSION_1;
+           } else if (!strcmp(version, "2") || !strcmp(version, "2c")) {
+		ss->version = SNMP_VERSION_2c;
+           } else {
+		if (verbose)
+                   warn("Unsupported SNMP version (%s)\n", version);
+                goto update_end;
+	   }
+           /* WARNING LEAKAGE but I cant free lib memory under win32 */
+           ss->community_len = strlen((char *)community);
+           ss->community = (u_char *)strdup(community);
+	   ss->peername = strdup(peer);
+	   ss->remote_port = port;
+           ss->retries = retries; /* 5 */
+           ss->timeout = timeout; /* 1000000L */
+           ss->authenticator = NULL;
+           
+    update_end:
+	   RETVAL = ss;
+        }
+        OUTPUT:
+           RETVAL
+
 int
 snmp_add_mib_dir(mib_dir,force=0)
 	char *		mib_dir
@@ -945,7 +1026,10 @@ snmp_read_mib(mib_file, force=0)
 	   }
         } else {
            if (verbose) warn("reading MIB: %s\n", mib_file);
-	   Mib = read_mib(mib_file);
+           if (strcmp("ALL",mib_file))
+              Mib = read_mib(mib_file);
+           else
+             Mib = read_all_mibs();
            if (Mib) {
               if (verbose) warn("done\n");
            } else {
@@ -1444,18 +1528,6 @@ snmp_translate_obj(var,mode,use_long)
         OUTPUT:
         RETVAL
 
-SnmpMibNode *
-snmp_lookup_tag(tag)
-	char *		tag
-	CODE:
-	{
-	   struct tree *tp  = NULL;
-           if (tag && *tag) tp = __tag2oid(tag, NULL, NULL, NULL, NULL);
-	   RETVAL = tp;
-	}
-	OUTPUT:
-        RETVAL
-
 void
 snmp_set_save_descriptions(val)
 	int	val
@@ -1463,7 +1535,6 @@ snmp_set_save_descriptions(val)
 	{
 	   snmp_set_save_descriptions(val);
 	}
-
 
 void
 snmp_sock_cleanup()
@@ -1474,15 +1545,15 @@ snmp_sock_cleanup()
 
 MODULE = SNMP	PACKAGE = SNMP::MIB::NODE 	PREFIX = snmp_mib_node_
 SV *
-snmp_mib_node_TIEHASH(class,key)
+snmp_mib_node_TIEHASH(class,key,tp=0)
 	char *	class
 	char *	key
+        IV tp
 	CODE:
 	{
-           SnmpMibNode *tp;
-           tp = __tag2oid(key, NULL, NULL, NULL, NULL);
+           if (!tp) tp = (IV)__tag2oid(key, NULL, NULL, NULL, NULL);
            ST(0) = sv_newmortal();
-           sv_setref_iv(ST(0), class, (IV)tp);
+           if (tp) sv_setref_iv(ST(0), class, tp);
 	}
 
 SV *
@@ -1492,10 +1563,11 @@ snmp_mib_node_FETCH(tp_ref, key)
 	CODE:
 	{
 	   char c = *key;
-	   oid newname[MAX_OID_LEN], *op;
-	   int newname_len = 0;
 	   char str_buf[STR_BUF_SIZE];
            SnmpMibNode *tp = NULL;
+           SV *child_list_aref, *next_node_href, *mib_tied_href, **nn_hrefp;
+           HV *mib_hv;
+           MAGIC *mg;
 
            if (SvROK(tp_ref)) tp = (SnmpMibNode*)SvIV((SV*)SvRV(tp_ref));
 
@@ -1503,45 +1575,138 @@ snmp_mib_node_FETCH(tp_ref, key)
            if (tp)
 	   switch (c) {
 	      case 'o': /* objectID */
-	         /* code taken from get_node in snmp_client.c */
-        	 for(op = newname + MAX_OID_LEN - 1; op >= newname; op--){
-	           *op = tp->subid;
-		   tp = tp->parent;
-		   if (tp == NULL)
-		      break;
-        	 }
-		 __sprint_num_objid(str_buf, op, newname + MAX_OID_LEN - op);
+                 if (strncmp("objectID", key, strlen(key))) break;
+                 __tp_sprint_num_objid(str_buf, tp);
                  sv_setpv(ST(0),str_buf);
                  break;
 	      case 'l': /* label */
+                 if (strncmp("label", key, strlen(key))) break;
                  sv_setpv(ST(0),tp->label);
                  break;
 	      case 's': /* subID */
+                 if (strncmp("subID", key, strlen(key))) break;
                  sv_setiv(ST(0),(I32)tp->subid);
                  break;
 	      case 'm': /* moduleID */
+                 if (strncmp("moduleID", key, strlen(key))) break;
                  sv_setiv(ST(0),(I32)tp->modid);
                  break;
 	      case 'p': /* parent */
+                 if (strncmp("parent", key, strlen(key))) break;
+                 tp = tp->parent;
+                 if (tp == NULL) {
+                    sv_setsv(ST(0), &sv_undef);
+                    break;
+                 }
+                 mib_hv = perl_get_hv("SNMP::MIB", FALSE);
+                 if (SvMAGICAL(mib_hv)) mg = mg_find((SV*)mib_hv, 'P');
+                 if (mg) mib_tied_href = (SV*)mg->mg_obj;
+                 next_node_href = newRV((SV*)newHV());
+                 __tp_sprint_num_objid(str_buf, tp);
+                 nn_hrefp = hv_fetch((HV*)SvRV(mib_tied_href), 
+                                     str_buf, strlen(str_buf), 1); 
+                 if (!SvROK(*nn_hrefp)) { 
+                 sv_setsv(*nn_hrefp, next_node_href);
+                 ENTER ;
+                 SAVETMPS ;
+                 PUSHMARK(sp) ;
+                 XPUSHs(SvRV(*nn_hrefp));
+                 XPUSHs(sv_2mortal(newSVpv("SNMP::MIB::NODE",0)));
+                 XPUSHs(sv_2mortal(newSVpv(str_buf,0)));
+                 XPUSHs(sv_2mortal(newSViv((IV)tp)));
+                 PUTBACK ;
+                 pp_tie();
+                 SPAGAIN ;
+                 FREETMPS ;
+                 LEAVE ;
+                 }
+                 sv_setsv(ST(0), *nn_hrefp);
                  break;
-	      case 'c': /* children */
+  	      case 'c': /* children */
+                 if (strncmp("children", key, strlen(key))) break;
+                 child_list_aref = newRV((SV*)newAV());
+                 for (tp = tp->child_list; tp; tp = tp->next_peer) {
+                    mib_hv = perl_get_hv("SNMP::MIB", FALSE);
+                    if (SvMAGICAL(mib_hv)) mg = mg_find((SV*)mib_hv, 'P');
+                    if (mg) mib_tied_href = (SV*)mg->mg_obj;
+                    next_node_href = newRV((SV*)newHV());
+                    __tp_sprint_num_objid(str_buf, tp);
+                    nn_hrefp = hv_fetch((HV*)SvRV(mib_tied_href), 
+                                        str_buf, strlen(str_buf), 1); 
+                    if (!SvROK(*nn_hrefp)) { 
+                       sv_setsv(*nn_hrefp, next_node_href);
+                       ENTER ;
+                       SAVETMPS ;
+                       PUSHMARK(sp) ;
+                       XPUSHs(SvRV(*nn_hrefp));
+                       XPUSHs(sv_2mortal(newSVpv("SNMP::MIB::NODE",0)));
+                       XPUSHs(sv_2mortal(newSVpv(str_buf,0)));
+                       XPUSHs(sv_2mortal(newSViv((IV)tp)));
+                       PUTBACK ;
+                       pp_tie();
+                       SPAGAIN ;
+                       FREETMPS ;
+                       LEAVE ;
+                    } /* if SvROK */
+                    av_push((AV*)SvRV(child_list_aref), *nn_hrefp);
+                 } /* for child_list */
+                 sv_setsv(ST(0), child_list_aref);
                  break;
 	      case 'n': /* nextNode */
-                 
+                 if (strncmp("nextNode", key, strlen(key))) break;
+                 tp = __get_next_mib_node(tp);
+                 if (tp == NULL) {
+                    sv_setsv(ST(0), &sv_undef);
+                    break;
+                 }
+                 mib_hv = perl_get_hv("SNMP::MIB", FALSE);
+                 if (SvMAGICAL(mib_hv)) mg = mg_find((SV*)mib_hv, 'P');
+                 if (mg) mib_tied_href = (SV*)mg->mg_obj;
+                 next_node_href = newRV((SV*)newHV());
+                 __tp_sprint_num_objid(str_buf, tp);
+                 /*
+                 nn_hrefp = hv_store((HV*)SvRV(mib_tied_href), 
+                                     str_buf, strlen(str_buf), 
+                                     next_node_href, 0); 
+                 */
+                 nn_hrefp = hv_fetch((HV*)SvRV(mib_tied_href), 
+                                     str_buf, strlen(str_buf), 1); 
+                 /* if (!SvROK(*nn_hrefp)) { */ /* bug in ucd - 2 .0.0 nodes */
+                 sv_setsv(*nn_hrefp, next_node_href);
+                 ENTER ;
+                 SAVETMPS ;
+                 PUSHMARK(sp) ;
+                 XPUSHs(SvRV(*nn_hrefp));
+                 XPUSHs(sv_2mortal(newSVpv("SNMP::MIB::NODE",0)));
+                 XPUSHs(sv_2mortal(newSVpv(str_buf,0)));
+                 XPUSHs(sv_2mortal(newSViv((IV)tp)));
+                 PUTBACK ;
+                 pp_tie();
+                 SPAGAIN ;
+                 FREETMPS ;
+                 LEAVE ;
+                 /* } */
+                 sv_setsv(ST(0), *nn_hrefp);
                  break;
 	      case 't': /* type */
+                 if (strncmp("type", key, strlen(key))) break;
                  break;
 	      case 'a': /* access */
+                 if (strncmp("access", key, strlen(key))) break;
                  break;
 	      case 'u': /* units */
+                 if (strncmp("units", key, strlen(key))) break;
                  sv_setpv(ST(0),tp->units);
                  break;
 	      case 'h': /* hint */
-                 sv_setpv(ST(0),tp->description);
+                 if (strncmp("hint", key, strlen(key))) break;
+                 sv_setpv(ST(0),tp->hint);
                  break;
 	      case 'e': /* enums */
+                 if (strncmp("enums", key, strlen(key))) break;
                  break;
 	      case 'd': /* description */
+                 if (strncmp("description", key, strlen(key))) break;
                  sv_setpv(ST(0),tp->description);
                  break;
               default:

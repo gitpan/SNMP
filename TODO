@@ -5,6 +5,10 @@ general select loop (and/or EventDrivenServer) This would really be
 easier and more reliable/compatible if/when event handling is moved to
 the perl core.
 
+finish and document the SNMP::MIB mib tree access API
+
+look for *Not Implemeted* and implement :)
+
 allow unloading and reinitialization of parsed MIB (change to ucd-snmp?)
 
 allow MIB use on a per Session basis (ie. dependent on agent type and

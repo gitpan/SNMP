@@ -153,7 +153,7 @@ sub getType {
 sub mapEnum {
   my $varbind = shift;
 
-  SNMP::_map_enum($varbind->[$SNMP::Varbind::tag_f]);
+  # SNMP::_map_enum($varbind->[$SNMP::Varbind::tag_f]);
 }
 
 package SNMP::Session;
@@ -219,6 +219,50 @@ sub new {
    $this->{UseEnums} ||= $SNMP::use_enums;
 
    bless $this;
+}
+
+sub update {
+# designed to update the fields of session to allow retargettinf to different
+# host, community name change, timeout, retry changes etc. Unfortunately not
+# working yet because some updates (the address in particular) need to be 
+# done on the internal session pointer which cannot be fetched w/o touching
+# globals at this point which breaks win32. A patch to the ucd-snmp toolkit 
+# is needed
+   my $this = shift;
+   my ($name, $aliases, $host_type, $len, $thisaddr);
+   my %new_fields = @_;
+
+   @$this{keys %new_fields} = values %new_fields;
+
+   # convert to dotted ip addr if needed
+   if (exists $new_fields{DestHost}) {
+      if ($this->{DestHost} =~ /\d+\.\d+\.\d+\.\d+/) {
+        $this->{DestAddr} = $this->{DestHost};
+      } else {
+        if (($name, $aliases, $host_type, $len, $thisaddr) =
+           gethostbyname($this->{DestHost})) {
+           $this->{DestAddr} = join('.', unpack("C4", $thisaddr));
+        } else {
+           warn("unable to resolve destination address($this->{DestHost}!")
+              if $SNMP::verbose;
+           return undef;
+        }
+      }
+   }
+
+   $this->{UseLongNames} ||= $SNMP::use_long_names;
+   $this->{UseSprintValue} ||= $SNMP::use_sprint_value;
+   $this->{UseEnums} ||= $SNMP::use_enums;
+
+   SNMP::_update_session($this->{Version},
+		 $this->{Community},
+		 $this->{DestAddr},
+		 $this->{RemotePort},
+		 $this->{Retries},
+		 $this->{Timeout},
+		);
+
+  
 }
 
 sub set {
@@ -389,8 +433,11 @@ sub DELETE {
 }
 
 sub FIRSTKEY { return '.1'; }
-sub NEXTKEY { $_[0]->FETCH($_[1])->{nextNode}{objectID}; } 
-sub EXISTS { exits $_[0]->{$_[1]} || $_[0]->FETCH($_[1]); }
+sub NEXTKEY { # this could be sped up by using an XS __get_next_oid maybe
+   my $node = $_[0]->FETCH($_[1])->{nextNode};
+   $node->{objectID};  
+} 
+sub EXISTS { exists $_[0]->{$_[1]} || $_[0]->FETCH($_[1]); }
 sub CLEAR { undef %{$_[0]}; } # clear the cache
 
 package SNMP::MIB::NODE;
@@ -416,17 +463,19 @@ my %node_elements =
 # sub FETCH - implemented in SNMP.xs
 
 sub STORE {
-    warn "STORE(@_): write access to the MIB not implemented\n";
+    warn "STORE(@_): write access to MIB node not implemented\n";
 }
 
 sub DELETE {
-    warn "DELETE(@_): write access to the MIB not implemented\n";
+    warn "DELETE(@_): write access to MIB node not implemented\n";
 }
 
-sub FIRSTKEY {  }
-sub NEXTKEY {  }
-sub EXISTS {  }
-sub CLEAR {  }
+sub FIRSTKEY { my $k = keys %node_elements; (each(%node_elements))[0]; }
+sub NEXTKEY { (each(%node_elements))[0]; }
+sub EXISTS { exists($node_elements{$_[1]}); }
+sub CLEAR {  
+    warn "CLEAR(@_): write access to MIB node not implemented\n";
+}
 
 package SNMP::MIB::SAVE_DESCR;
 
