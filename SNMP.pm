@@ -56,30 +56,107 @@ sub AUTOLOAD {
 bootstrap SNMP;
 
 # Preloaded methods go here.
-$auto_init_mib = 1; # set to true, mib is loaded on session creation
-                    # set to zero(0) to disable auto-load of mib -
-                    # user should call setMib to load mib
+$auto_init_mib = 1; # DEPRECATED
+$mib_loaded = 0; # flag to indicate if mib has been loaded. mib loading
+                 # routines set this flag as a side effect. flag is checked
+                 # upon session creation and if false triggers auto loading
 $verbose = 0; # set to false, limit extraneous I/O
-
+$use_long_names = 0; # set to 1 to prefer longer mib textual identifiers rather
+                     # than just leaf indentifiers in translateObj
 
 sub setMib {
 # loads mib from file name provided
-# won't override currently loaded mib unless second arg(force) is non-zero
+# setting second arg to true causes currently loaded mib to be replaced
+# otherwise mib file will be added to existing loaded mib database
+# NOTE: now deprecated in favor of setMibFiles and new module based funcs
    my $file = shift;
    my $force = shift || '0';
    return 0 if $file and not (-r $file);
-   SNMP::_setmib($file,$force);
+   SNMP::_read_mib($file,$force);
+   $SNMP::mib_loaded = 1;
+}
+
+sub setMibFiles {
+# replaces currently loaded mib database with mib defined in
+# file(s) supplied - if no files supplied, will call init_mib and
+# rely entirely on ucd environment variable settings (see man mib_api)
+   my $file = shift || '';
+
+   SNMP::_read_mib($file, 1) unless $file and not (-r $file);
+   foreach $file (@_) {
+     next if $file and not (-r $file);
+     SNMP::_read_mib($file);
+   }
+   $SNMP::mib_loaded = 1;
+}
+
+sub addMibFiles {
+# adds mib definitions to currently loaded mib database from
+# file(s) supplied - if no files supplied, will call init_mib and
+# rely entirely on ucd environment variable settings (see man mib_api)
+   my $file = shift || '';
+   SNMP::_read_mib($file) unless $file and not (-r $file);
+   foreach $file (@_) {
+     next if $file and not (-r $file);
+     SNMP::_read_mib($file);
+   }
+   $SNMP::mib_loaded = 1;
+}
+
+sub setMibDirs {
+# ideally this would reinitialize currently defined mib search directories
+# but no api for that that I can find so this function just adds to mib
+# search dirs identical to addMibDirs
+  my $dir;
+  foreach $dir (@_) {
+    SNMP::_add_mib_dir($dir);
+  }
+  SNMP::_init_mib_internals();
+}
+
+sub addMibDirs {
+  my $dir;
+  foreach $dir (@_) {
+    SNMP::_add_mib_dir($dir);
+  }
+  SNMP::_init_mib_internals();
+}
+
+sub setModules {
+# replaces currently loaded mib database with mib definitions from supplied
+# modules. Modules will be searched from previously defined mib search dirs
+   my $mod = shift || '';
+   SNMP::_read_module($mod);
+   foreach $mod (@_) {
+     SNMP::_read_module($mod);
+   }
+   $SNMP::mib_loaded = 1;
+}
+
+sub addModules {
+# adds mib definitions from supplied modules to currently loaded mib database.
+# Modules will be searched from previously defined mib search dirs
+   my $mod = shift;
+   $mod =~ s/^ALL$//;
+   SNMP::_read_module($mod);
+   foreach $mod (@_) {
+     SNMP::_read_module($mod);
+   }
+   $SNMP::mib_loaded = 1;
 }
 
 sub translateObj {
 # translate object identifier(tag or numeric) into alternate representation
 # (i.e., sysDescr => '.1.3.6.1.2.1.1.1' and '.1.3.6.1.2.1.1.1' => sysDescr)
+# when $SNMP::use_long_names or second arg is non-zero the translation will
+# return longer textual identifiers (e.g., system.sysDescr)
    my $obj = shift;
+   my $use_long_names = shift || $SNMP::use_long_names;
 
    if ($obj =~ /^\.?(\d+\.)*\d+$/) {
-      SNMP::_translate($obj,1);
+      SNMP::_translate_obj($obj,1,$use_long_names);
    } elsif ($obj =~ /(\w+)+(\.\d+)*$/) {
-      SNMP::_translate($1,0) . $2;
+      SNMP::_translate_obj($1,0,$use_long_names) . $2;
    } else {
       undef;
    }
@@ -148,8 +225,9 @@ sub new {
 					 $this->{Retries},
 					 $this->{Timeout},
 					);
-
-   SNMP::setMib() if $SNMP::auto_init_mib;
+   # if mib is not already loaded try to load with no parameters
+   # will attempt to load according to environment variables
+   SNMP::setMibFiles() unless $SNMP::mib_loaded;
 
    bless $this;
 }

@@ -6,32 +6,36 @@ unless ($host) {
   chomp($host = <STDIN>);
 }
 
-$SNMP::verbose = 1; # right now only echos mib load progress, more later
+$SNMP::verbose = 0; # right now only echos mib load progress, more later
 
-# $SNMP::auto_init_mib = 0; # set to one for programmer control of mib loading
-                          # see SNMP::setMib below
+#$SNMP::use_long_names = 1; # if non-zero longer mib names are returned from
+                           # translateObj
 
 print "\nBegin test script, SNMP Module version $SNMP::VERSION\n";
-print "Automatic Mib Initialization: ",
-       ($SNMP::auto_init_mib ? 'ENABLED' : 'DISABLED'), "\n";
 print "Verbose Output: ",
        ($SNMP::verbose ? 'ENABLED' : 'DISABLED'), "\n\n";
-
-# SNMP::setMib('mib.txt'); # load mib from specified file, pass second arg
-                           # non-zero to force mib change from prev. load
+                       # load mib from specified file, pass second arg
+                       # non-zero to force mib change from prev. load
+                       # otherwise mib definition will be added to
+                       # currently loaded mib database
+#SNMP::setMibFiles('mib.txt');
+                       # or
+                       # explicitly set directories to hold mib files
+#SNMP::setMibDirs('/usr/local/lib/snmp/mibs', '../mibs');
+                       # and load explicit mib modules by name or all
+                       # using the key word 'ALL'
+#SNMP::addModules('ALL');
 
 # create new Session
 
 $session = new SNMP::Session ( DestHost => $host );
 
 print "\n\$session->\{DestHost\}  = $session->{DestHost}\n",
-      "\$session->\{DestAddr\}  = $session->{DestAddr}\n", 
-      "\$session->\{Version\}   = $session->{Version}\n", 
+      "\$session->\{DestAddr\}  = $session->{DestAddr}\n",
+      "\$session->\{Version\}   = $session->{Version}\n",
       "\$session->\{Community\} = $session->{Community}\n\n";
 
-$host = $session->{DestAddr}; # make sure host is dotted decimal ip addr
-
-# create list of varbinds for GETS, val field can be null or omitted
+# create list of varbinds for GETS, val and type fields can be null or omitted
 $vars = new SNMP::VarList (
 			   ['sysDescr', '0', ''],
 			   ['sysContact', '0'],
@@ -96,10 +100,10 @@ print "sysObjectID.0 = $val\n\n";
 print "table walk test(getnext)\nipAddrEntry Table:\n";
 for ($vars=new SNMP::VarList([ipAdEntAddr],[ipAdEntIfIndex],[ipAdEntNetMask]),
      @vals = $session->getnext($vars);
-     $vars->[0]->tag =~ /ipAdEntAddr/ and
-     not $session->{ErrorStr};
+     $vars->[0]->tag =~ /ipAdEntAddr/ and # still in table
+     not $session->{ErrorStr}; # and not end of mib or other error
      @vals = $session->getnext($vars)) {
-     
+
      print "   $vals[0]/$vals[2] ($vals[1])\n";
 
 }
@@ -120,4 +124,4 @@ $tag_iid = SNMP::translateObj($oid);
 print "tag.iid = $tag_iid\n";
 
 
- 
+

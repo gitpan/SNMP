@@ -38,15 +38,14 @@ int snmp_dump_packet = 0;
 #define VARBIND_VAL_F 2
 #define VARBIND_TYPE_F 3
 
-static int __sprint_ipaddr _((char *, u_char *));
+static void __free_tree _((struct tree *));
+static int __sprint_value _((char *, struct variable_list*, int));
 static int __sprint_num_objid _((char *, oid *, int));
 static int __get_type_str _((int, char *));
 static int __get_last_label_iid _((char *, char **, char **, int));
-static struct tree *__free_tree _((struct tree *));
 static int __oid_cmp _((oid *, int, oid *, int));
 static int __tag2oid _((char *, char *, oid  *, int  *, int *));
 static int __concat_oid_str _((oid *, int *, char *));
-static int __translate_str _((char *, char *, int));
 static void __add_var_val_str _((struct snmp_pdu *, oid *, int, char *,
                                  int, int));
 static int __send_sync_pdu _((struct snmp_session *, struct snmp_pdu *,
@@ -56,13 +55,52 @@ static int __send_sync_pdu _((struct snmp_session *, struct snmp_pdu *,
 
 typedef struct snmp_session SnmpSession;
 
-static int __sprint_ipaddr (buf, ip)
-char *buf;
-u_char *ip;
+static void
+__free_tree(Tree)
+struct tree *Tree;
 {
-   sprintf(buf,"%d.%d.%d.%d",ip[0],ip[1],ip[2],ip[3]);
-   return SUCCESS;
+    if (Tree == NULL)
+    {
+        return;
+    }
+
+    if (Tree->enums)
+    {
+        struct enum_list *ep, *tep;
+
+        ep = Tree->enums;
+        while(ep)
+        {
+            tep = ep;
+            ep = ep->next;
+            if (tep->label)
+                free(tep->label);
+
+            free(tep);
+        }
+    }
+
+    if (Tree->description)
+        free(Tree->description);
+    if (Tree->label)
+        free(Tree->label);
+
+    if (Tree->number_modules > 1 )
+        free(Tree->module_list);
+
+    __free_tree(Tree->child_list);
+    free (Tree);
 }
+
+static int __sprint_value (buf, var, type)
+char * buf;
+struct variable_list * var;
+int type;
+{
+   buf[0] = '\0';
+   sprint_value(buf, var->name, var->name_length, var);
+}
+
 static int __sprint_num_objid (buf, objid, len)
 char *buf;
 oid *objid;
@@ -71,7 +109,7 @@ int len;
    int i;
    buf[0] = '\0';
    for (i=0; i < len; i++) {
-	sprintf(buf,".%d",*objid++);
+	sprintf(buf,".%ld",*objid++);
 	buf += strlen(buf);
    }
    return SUCCESS;
@@ -165,22 +203,6 @@ int fail_on_null_iid;
    return(SUCCESS);
 }
 
-/* does a depth first free of tree, returning next_peer */
-static struct tree *__free_tree(tree)
-struct tree * tree;
-{
-   struct tree *tp = tree->child_list;
-   struct tree *next_peer = tree->next_peer;
-
-   while (tp) {
-     tp = __free_tree(tp);
-   }
-
-   if (tree->description) free(tree->description);
-   free(tree);
-   return(next_peer);
-}
-
 
 static int
 __oid_cmp(oida_arr, oida_arr_len, oidb_arr, oidb_arr_len)
@@ -235,7 +257,14 @@ int  * type;
    return FAILURE;
 }
 
-
+/* function: __concat_oid_str
+ *
+ * This function converts a dotted-decimal string, soid_str, to an array
+ * of oid types and concatenates them on doid_arr begining at the index
+ * specified by doid_arr_len.
+ *
+ * returns : SUCCESS, FAILURE
+ */
 static int
 __concat_oid_str(doid_arr, doid_arr_len, soid_str)
 oid *doid_arr;
@@ -252,54 +281,6 @@ char * soid_str;
      cp = strtok(NULL,".");
    }
    return(SUCCESS);
-}
-
-#define SNMP_XLATE_MODE_OID2TAG 1
-#define SNMP_XLATE_MODE_TAG2OID 0
-
-static int
-__translate_str(name_str, oid_str, mode)
-char *name_str;
-char *oid_str;
-int  mode;
-{
-   char str_buf[2048];
-   oid oid_arr[MAX_NAME_LEN];
-   int oid_arr_len = MAX_NAME_LEN;
-   char * label;
-   char * iid;
-
-   char *oid_strp;
-   int  count;
-   int result = FAILURE;
-
-   switch (mode) {
-     case SNMP_XLATE_MODE_TAG2OID:
-       if (!get_node(name_str, oid_arr, &oid_arr_len)){
-          warn("Unknown object descriptor %s\n", name_str);
-       } else {
-	 result = __sprint_num_objid(oid_str, oid_arr, oid_arr_len);
-       }
-       break;
-     case SNMP_XLATE_MODE_OID2TAG:
-        oid_arr_len = 0;
-        __concat_oid_str(oid_arr, &oid_arr_len, oid_str);
-        str_buf[0] = '\0'; label == NULL; iid = NULL; name_str[0] = '\0';
-        sprint_objid(str_buf, oid_arr, oid_arr_len);
-        if (((result=__get_last_label_iid(str_buf,
-                               &label, &iid, NO_FAIL_ON_NULL_IID)) == SUCCESS)
-            && label) {
-	   strcpy(name_str, label);
-	   if (iid && *iid) {
-	     strcat(name_str, ".");
-	     strcat(name_str, iid);
-           }
-        }
-       break;
-     default:
-       fprintf(stderr, "Unknown translation mode %d\n", mode);
-   }
-   return(result);
 }
 
 /*
@@ -712,39 +693,91 @@ snmp_new_session(version, community, peer, port, retries, timeout)
 
 
 int
-snmp_setmib(mib_file,force=0)
+snmp_read_mib(mib_file,force=0)
 	char *		mib_file
 	int		force
 	CODE:
         {
 	SV *verbose;
 
-  fprintf(stderr,"hi in setmib %ld\n",Mib);
-           if (((mib_file != NULL) && (*mib_file != '\0')) || force || !Mib) {
-  fprintf(stderr,"hi in setmib %ld:%s\n",Mib,mib_file);
-	      verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
+        verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
 
-              if (Mib) Mib = __free_tree(Mib);
+        if (SvIV(verbose)) fprintf (stderr, "initializing MIB...");
+        fflush(stderr);
 
-              if (SvIV(verbose)) fprintf (stderr, "initializing MIB...");
-              fflush(stderr);
+        if (Mib && force) __free_tree(Mib);
 
-              if ((mib_file == NULL) || (*mib_file == '\0')) {
-                 init_mib();
-              } else {
-	         Mib = read_mib(mib_file);
-              }
-
-              if (Mib) {
-                 if (SvIV(verbose)) fprintf(stderr, "done\n");
-              } else {
-                 if (SvIV(verbose)) fprintf(stderr, "failed\n");
-              }
-           }
-           RETVAL = (I32)Mib;
+        if ((mib_file == NULL) || (*mib_file == '\0')) {
+           if (Mib == NULL) init_mib();
+        } else {
+	   Mib = read_mib(mib_file);
+        }
+        if (Mib) {
+           if (SvIV(verbose)) fprintf(stderr, "done\n");
+        } else {
+           if (SvIV(verbose)) fprintf(stderr, "failed\n");
+        }
+        RETVAL = (I32)Mib;
         }
         OUTPUT:
         RETVAL
+
+int
+snmp_add_mib_dir(mib_dir,force=0)
+	char *		mib_dir
+	int		force
+	CODE:
+        {
+	SV *verbose;
+	int result;
+        verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
+        if (mib_dir && *mib_dir) {
+	   result = add_mibdir(mib_dir);
+        }
+        if (result) {
+           if (SvIV(verbose)) fprintf(stderr, "added %s\n", mib_dir);
+        } else {
+           if (SvIV(verbose)) fprintf(stderr, "Failed to add %s\n", mib_dir);
+        }
+        RETVAL = (I32)result;
+        }
+        OUTPUT:
+        RETVAL
+
+void
+snmp_init_mib_internals()
+	CODE:
+        {
+	init_mib_internals();
+	}
+
+int
+snmp_read_module(module,force=0)
+	char *		module
+	int		force
+	CODE:
+        {
+	SV *verbose;
+
+        verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
+
+        if (Mib && force) __free_tree(Mib);
+
+        if ((module == NULL) || (*module == '\0')) {
+           Mib = read_all_mibs();
+        } else {
+	   Mib = read_module(module);
+        }
+        if (Mib) {
+           if (SvIV(verbose)) fprintf(stderr, "Read %s\n", module);
+        } else {
+           if (SvIV(verbose)) fprintf(stderr, "Failed to read %s\n", module);
+        }
+        RETVAL = (I32)Mib;
+        }
+        OUTPUT:
+        RETVAL
+
 
 int
 snmp_set(sess_ref, varlist_ref)
@@ -815,7 +848,7 @@ snmp_set(sess_ref, varlist_ref)
 
 	      status = __send_sync_pdu(ss, pdu, &response_vars,
 				       NO_RETRY_NOSUCH,
-                                       *err_str_svp, *err_num_svp, 
+                                       *err_str_svp, *err_num_svp,
                                        *err_ind_svp);
 
 	      XPUSHs(sv_2mortal(newSViv(snmp_errno)));
@@ -923,7 +956,7 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref)
 		       __get_type_str(type, tmp_type_str);
                        tmp_sv = newSVpv(tmp_type_str,strlen(tmp_type_str));
                        av_store(varbind, VARBIND_TYPE_F, tmp_sv);
-                       sprint_value(str_buf,vars->name,vars->name_length,vars);
+                       __sprint_value(str_buf,vars,type);
                        tmp_sv= newSVpv((char*)str_buf, strlen(str_buf));
                        av_store(varbind, VARBIND_VAL_F, tmp_sv);
                        XPUSHs(sv_mortalcopy(tmp_sv));
@@ -1043,7 +1076,7 @@ snmp_getnext(sess_ref, varlist_ref)
                        tmp_sv = newSVpv(tmp_type_str, strlen(tmp_type_str));
 	      	       av_store(varbind, VARBIND_TYPE_F, tmp_sv);
 
-                       sprint_value(str_buf,vars->name,vars->name_length,vars);
+                       __sprint_value(str_buf,vars,type);
                        tmp_sv = newSVpv((char*)str_buf, strlen(str_buf));
                        av_store(varbind, VARBIND_VAL_F, tmp_sv);
                        XPUSHs(sv_mortalcopy(tmp_sv));
@@ -1103,25 +1136,56 @@ snmp_map_enum(tag)
 	OUTPUT:
         RETVAL
 
+#define SNMP_XLATE_MODE_OID2TAG 1
+#define SNMP_XLATE_MODE_TAG2OID 0
+
 char *
-snmp_translate(var,mode)
+snmp_translate_obj(var,mode,use_long)
 	char *		var
 	int		mode
+	int		use_long
 	CODE:
 	{
 	   char str_buf[2048];
+	   oid oid_arr[MAX_NAME_LEN];
+           int oid_arr_len = MAX_NAME_LEN;
+           char * label;
+           char * iid;
            int status = FAILURE;
 
-	   switch (mode) {
+  	   switch (mode) {
               case SNMP_XLATE_MODE_TAG2OID:
-	       status = __translate_str(var, str_buf, mode);
-               break;
-              case SNMP_XLATE_MODE_OID2TAG:
-	       status = __translate_str(str_buf, var, mode);
-               break;
-              default:
+		if (!get_node(var, oid_arr, &oid_arr_len)) {
+		   warn("Unknown OID %s\n",var);
+                } else {
+                   status = __sprint_num_objid(str_buf, oid_arr, oid_arr_len);
+                }
+                RETVAL = str_buf;
+                break;
+             case SNMP_XLATE_MODE_OID2TAG:
+		oid_arr_len = 0;
+		__concat_oid_str(oid_arr, &oid_arr_len, var);
+		str_buf[0] = '\0';
+                label = NULL;
+                iid = NULL;
+		sprint_objid(str_buf, oid_arr, oid_arr_len);
+		if (!use_long) {
+		  if (((status=__get_last_label_iid(str_buf,
+		       &label, &iid, NO_FAIL_ON_NULL_IID)) == SUCCESS)
+		      && label) {
+		     strcpy(str_buf, label);
+		     if (iid && *iid) {
+		       strcat(str_buf, ".");
+		       strcat(str_buf, iid);
+		     }
+ 	          }
+	        }
+                RETVAL = str_buf;
+                break;
+             default:
+	       warn("unknown translation mode: %s\n", mode);
+      	       RETVAL = NULL;
            }
-	   RETVAL = (status == SUCCESS ? str_buf : NULL);
 	}
         OUTPUT:
         RETVAL

@@ -16,9 +16,9 @@ validation/going over. See that informative strings are returned and the
 the error number is useful in all cases.
 
 implement an asynchronous interface so multiple requests can be sent out
-and responses can be handled with a call-back. probably should make a
+and responses can be handled with a call-back. probably should make an
 SNMP::snmp_callback which can be installed with Tk's fileevent or a
-geneal select loop (and/or EventDrivenserver) This would really be
+general select loop (and/or EventDrivenServer) This would really be
 easier and more reliable/compatible if/when event handling is moved to
 the perl core.
 
@@ -26,7 +26,7 @@ implement more v2-isms. (assuming some stability and consensus on what
 that is) (waiting eagerly for dperkins work on polishing v2 in ucd's
 lib)
 
-get SNMP module built and ruinning on win32 (dperkins also working on a
+get SNMP module built and running on win32 (dperkins also working on a
 port of the ucd lib to Win32)
 
 making SNMP work with -w.
