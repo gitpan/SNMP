@@ -2,6 +2,17 @@
 		       for the UCD SNMP Library
 		G.S. Marzot (gmarzot@baynetworks.com)
 
+Contents:
+   Introduction:
+   Availability:
+   Supported Platforms:
+   Installation:
+   patch
+   Operational Description:
+   Trouble Shooting:
+   Acknowledments:
+   History:
+
 
 Introduction:
 
@@ -31,6 +42,282 @@ Supported Platforms:
 	Linux 1.2.x, 2.0.x
 	Many other UNIX variants
 	Win95/NT   ***NEW***
+
+Installation:
+
+patch*/build/install ucd-snmp-3.3 libsnmp.a (e.g., /usr/local/lib)
+
+make sure header files are available someplace (e.g., /usr/local/include)
+
+after that it is basically
+
+perl Makefile.PL
+make
+make test
+make install
+
+*may not need patch in latest release of ucd-snmp
+----ucd.patch----
+diff -r -p ucd-snmp-3.3/snmplib/mib.c ucd-snmp-3.3.new/snmplib/mib.c
+*** ucd-snmp-3.3/snmplib/mib.c	Wed Nov  5 17:00:09 1997
+--- ucd-snmp-3.3.new/snmplib/mib.c	Sat Nov 22 21:36:24 1997
+*************** static void sprint_counter64 __P((char *
+*** 91,98 ****
+  static void sprint_unknowntype __P((char *, struct variable_list *, struct enum_list *, char *, char *));
+  static void sprint_badtype __P((char *, struct variable_list *, struct enum_list *, char *, char *));
+    
+- static struct tree *get_symbol __P((oid *, int, struct tree *, char *));
+- static struct tree *get_tree __P((oid *, int, struct tree *));
+  static char *get_description __P((oid *, int));
+  
+  static int quick_print = 0;
+--- 91,96 ----
+*************** extern void    init_mib_internals __P((v
+*** 778,783 ****
+--- 776,786 ----
+  extern int     which_module __P((char *));	/* from parse.c */
+  extern struct tree *find_tree_node __P((char *, int));	/* from parse.c */
+  
++ struct tree *get_tree_head __P((void))
++ {
++    return(tree_head);
++ }
++ 
+  void
+  init_mib __P((void))
+  {
+*************** fprint_value(f, objid, objidlen, variabl
+*** 1251,1257 ****
+      fprintf(f, "%s\n", tempbuf);
+  }
+  
+! static struct tree *
+  get_symbol(objid, objidlen, subtree, buf)
+      oid	    *objid;
+      int	    objidlen;
+--- 1254,1260 ----
+      fprintf(f, "%s\n", tempbuf);
+  }
+  
+! struct tree *
+  get_symbol(objid, objidlen, subtree, buf)
+      oid	    *objid;
+      int	    objidlen;
+*************** lc_cmp(s1, s2)
+*** 1326,1332 ****
+  /*
+   * Clone of get_symbol that doesn't take a buffer argument
+   */
+! static struct tree *
+  get_tree(objid, objidlen, subtree)
+      oid     *objid;
+      int     objidlen;
+--- 1329,1335 ----
+  /*
+   * Clone of get_symbol that doesn't take a buffer argument
+   */
+! struct tree *
+  get_tree(objid, objidlen, subtree)
+      oid     *objid;
+      int     objidlen;
+diff -r -p ucd-snmp-3.3/snmplib/mib.h ucd-snmp-3.3.new/snmplib/mib.h
+*** ucd-snmp-3.3/snmplib/mib.h	Wed Oct 29 15:43:38 1997
+--- ucd-snmp-3.3.new/snmplib/mib.h	Sat Nov 22 21:36:24 1997
+*************** void print_description __P((oid *, int))
+*** 272,274 ****
+--- 272,277 ----
+  void fprint_description __P((FILE *, oid *, int));
+  int get_module_node __P((char *, char *, oid *, int *));
+  int get_node __P((char *, oid *, int *));
++ struct tree *get_symbol __P((oid *, int, struct tree *, char *));
++ struct tree *get_tree __P((oid *, int, struct tree *));
++ struct tree *get_tree_head __P((void));
+diff -r -p ucd-snmp-3.3/snmplib/snmp.h ucd-snmp-3.3.new/snmplib/snmp.h
+*** ucd-snmp-3.3/snmplib/snmp.h	Wed Oct 29 15:43:38 1997
+--- ucd-snmp-3.3.new/snmplib/snmp.h	Sat Nov 22 21:36:24 1997
+*************** SOFTWARE.
+*** 145,150 ****
+--- 145,152 ----
+  /* in SNMPv2c, SNMPv2u, SNMPv2*, and SNMPv3 PDUs */
+  #define SNMP_ERR_INCONSISTENTNAME	(18)
+  
++ #define MAX_SNMP_ERR 18
++ 
+  /* values of the generic-trap field in trap PDUs */
+  #define SNMP_TRAP_COLDSTART		(0)
+  #define SNMP_TRAP_WARMSTART		(1)
+diff -r -p ucd-snmp-3.3/snmplib/snmp_api.c ucd-snmp-3.3.new/snmplib/snmp_api.c
+*** ucd-snmp-3.3/snmplib/snmp_api.c	Wed Nov 12 13:38:36 1997
+--- ucd-snmp-3.3.new/snmplib/snmp_api.c	Sat Nov 22 21:36:24 1997
+*************** static char *api_errors[-SNMPERR_MAX+1] 
+*** 224,229 ****
+--- 224,230 ----
+      "Bad Party definition",
+      "Session abort failure",
+      "Unknown PDU type",
++     "Timeout",
+  };
+  
+  struct timeval Now;
+*************** void snmp_set_dump_packet(val)
+*** 259,264 ****
+--- 260,270 ----
+  int snmp_get_dump_packet __P((void))
+  {
+      return snmp_dump_packet;
++ }
++ 
++ int snmp_get_errno __P((void))
++ {
++     return snmp_errno;
+  }
+  
+  void
+diff -r -p ucd-snmp-3.3/snmplib/snmp_api.h ucd-snmp-3.3.new/snmplib/snmp_api.h
+*** ucd-snmp-3.3/snmplib/snmp_api.h	Wed Oct 29 15:43:38 1997
+--- ucd-snmp-3.3.new/snmplib/snmp_api.h	Sat Nov 22 21:36:24 1997
+*************** extern void snmp_set_detail __P((char *)
+*** 129,135 ****
+  #define SNMPERR_BAD_PARTY	(-21)
+  #define SNMPERR_ABORT		(-22)
+  #define SNMPERR_UNKNOWN_PDU	(-23)
+! #define SNMPERR_MAX		(-23)
+  
+  #define non_repeaters	errstat
+  #define max_repetitions errindex
+--- 129,136 ----
+  #define SNMPERR_BAD_PARTY	(-21)
+  #define SNMPERR_ABORT		(-22)
+  #define SNMPERR_UNKNOWN_PDU	(-23)
+! #define SNMPERR_TIMEOUT 	(-24)
+! #define SNMPERR_MAX		(-24)
+  
+  #define non_repeaters	errstat
+  #define max_repetitions errindex
+*************** void snmp_set_dump_packet __P((int));
+*** 295,297 ****
+--- 296,299 ----
+  int snmp_get_dump_packet __P((void));
+  void snmp_set_quick_print __P((int));
+  int snmp_get_quick_print __P((void));
++ int snmp_get_errno __P((void));
+diff -r -p ucd-snmp-3.3/snmplib/snmp_client.c ucd-snmp-3.3.new/snmplib/snmp_client.c
+*** ucd-snmp-3.3/snmplib/snmp_client.c	Wed Nov 12 13:38:36 1997
+--- ucd-snmp-3.3.new/snmplib/snmp_client.c	Sat Nov 22 21:36:24 1997
+*************** snmp_synch_input(op, session, reqid, pdu
+*** 178,183 ****
+--- 178,184 ----
+      } else if (op == TIMED_OUT){
+  	state->pdu = NULL;
+  	state->status = STAT_TIMEOUT;
++         snmp_errno = SNMPERR_TIMEOUT;
+      }
+      return 1;
+  }
+*************** snmp_synch_setup(session)
+*** 403,414 ****
+  }
+  
+  char	*error_string[18] = {
+!     "No Error",
+!     "Response message would have been too large.",
+!     "There is no such variable name in this MIB.",
+!     "The value given has the wrong type or length.",
+!     "The two parties used do not have access to use the specified SNMP PDU.",
+!     "A general failure occured",
+      "noAccess",
+      "wrongType",
+      "wrongLength",
+--- 404,415 ----
+  }
+  
+  char	*error_string[18] = {
+!     "noError",
+!     "tooBig", /* Response message would have been too large */
+!     "noSuchName", /* There is no such variable name in this MIB */
+!     "badValue", /* The value given has the wrong type or length */
+!     "readOnly", /* The two parties do not have access to the specified PDU ?",
+!     "genError", /* A general failure occured */
+      "noAccess",
+      "wrongType",
+      "wrongLength",
+*************** char	*error_string[18] = {
+*** 420,433 ****
+      "commitFailed",
+      "undoFailed",
+      "authorizationError",
+!     "notWritable"
+  };
+  
+  char *
+  snmp_errstring(errstat)
+      int	errstat;
+  {
+!     if (errstat <= SNMP_ERR_NOTWRITABLE && errstat >= SNMP_ERR_NOERROR){
+  	return error_string[errstat];
+      } else {
+  	return "Unknown Error";
+--- 421,435 ----
+      "commitFailed",
+      "undoFailed",
+      "authorizationError",
+!     "notWritable",
+!     "inconsistentName"
+  };
+  
+  char *
+  snmp_errstring(errstat)
+      int	errstat;
+  {
+!     if (errstat <= MAX_SNMP_ERR && errstat >= SNMP_ERR_NOERROR){
+  	return error_string[errstat];
+      } else {
+  	return "Unknown Error";
+diff -r -p ucd-snmp-3.3/win32/libsnmp_dll/libsnmp.def ucd-snmp-3.3.new/win32/libsnmp_dll/libsnmp.def
+*** ucd-snmp-3.3/win32/libsnmp_dll/libsnmp.def	Wed Nov 12 23:27:11 1997
+--- ucd-snmp-3.3.new/win32/libsnmp_dll/libsnmp.def	Sun Nov 23 14:19:28 1997
+*************** EXPORTS
+*** 41,46 ****
+--- 41,47 ----
+  	print_mib
+  	print_ascii_dump
+  	read_objid
++ 	get_tree_head
+  	init_mib
+  	init_mib_internals
+  	print_variable
+*************** EXPORTS
+*** 54,59 ****
+--- 55,62 ----
+  	get_module_node
+  	get_node
+  	find_node
++ 	get_symbol
++ 	get_tree
+  	read_module
+  	read_mib
+  	read_all_mibs
+*************** EXPORTS
+*** 88,93 ****
+--- 91,97 ----
+  	snmp_free_var
+  	snmp_select_info
+  	snmp_timeout
++ 	snmp_get_errno
+  	snmp_set_dump_packet
+  	snmp_get_dump_packet
+  	snmp_set_quick_print
+*************** EXPORTS
+*** 97,102 ****
+--- 101,107 ----
+  	snmp_pdu_create
+  	snmp_fix_pdu
+  	snmp_clone_pdu
++ 	snmp_api_errstring
+  	snmp_errstring
+  	snmp_synch_setup
+  	snmp_synch_response
+------
 
 Operational Description:
 
@@ -155,8 +442,11 @@ methods:
 			    COUNTER => decimal unsigned integer,
 			    COUNTER64  => decimal unsigned integer,
 			    GAUGE,  => decimal unsigned integer,
+			    UINTEGER,  => decimal unsigned integer,
                             TICKS,  => decimal unsigned integer,
                             OPAQUE => perl scalar containing octets,
+       			    NULL,  => perl scalar containing nothing,
+
 
                    <type> - SNMP data type (see list above), this field is
                             populated by 'get' and 'getnext' operations. In
@@ -235,10 +525,10 @@ SNMP package variables and functions:
                        structure. Passing special <mod>, 'ALL', will cause
                        all known modules to be loaded.
 
- &SNMP::unloadModules(<mod>,...) - *not implemented*
+ &SNMP::unloadModules(<mod>,...) - *Not Implemented*
 
  &SNMP::translateObj(<var>) - will convert a text object tag to an OID and
-                            vice-versa. iid suffix is retained numerically
+                            vice-versa. iid suffix is retained numerically.
                             default behaviour when converting a numeric OID
                             to text form is to return leaf indentifier only
                             (e.g.,'sysDescr') but when $SNMP::use_long_names
@@ -250,95 +540,6 @@ SNMP package variables and functions:
 
  &SNMP::mapEnum(<var>) - converts integer value to enumertion tag defined
                         in Mib
-
-Installation:
-
-patch*/build/install ucd-snmp-3.3 libsnmp.a (e.g., /usr/local/lib)
-
-make sure header files are available someplace (e.g., /usr/local/include)
-
-after that it is basically
-
-perl Makefile.PL
-make
-make test
-make install
-
-*may not need patch in latest release of ucd-snmp
-----ucd.patch----
-*** ucd-snmp-3.3/snmplib/mib.c	Wed Nov  5 22:00:09 1997
---- ucd-snmp-3.3.new/snmplib/mib.c	Wed Nov 19 15:16:07 1997
-*************** static void sprint_counter64 __P((char *
-*** 91,98 ****
-  static void sprint_unknowntype __P((char *, struct variable_list *, struct enum_list *, char *, char *));
-  static void sprint_badtype __P((char *, struct variable_list *, struct enum_list *, char *, char *));
-
-- static struct tree *get_symbol __P((oid *, int, struct tree *, char *));
-- static struct tree *get_tree __P((oid *, int, struct tree *));
-  static char *get_description __P((oid *, int));
-
-  static int quick_print = 0;
---- 91,96 ----
-*************** fprint_value(f, objid, objidlen, variabl
-*** 1251,1257 ****
-      fprintf(f, "%s\n", tempbuf);
-  }
-
-! static struct tree *
-  get_symbol(objid, objidlen, subtree, buf)
-      oid	    *objid;
-      int	    objidlen;
---- 1249,1255 ----
-      fprintf(f, "%s\n", tempbuf);
-  }
-
-! struct tree *
-  get_symbol(objid, objidlen, subtree, buf)
-      oid	    *objid;
-      int	    objidlen;
-*************** lc_cmp(s1, s2)
-*** 1326,1332 ****
-  /*
-   * Clone of get_symbol that doesn't take a buffer argument
-   */
-! static struct tree *
-  get_tree(objid, objidlen, subtree)
-      oid     *objid;
-      int     objidlen;
---- 1324,1330 ----
-  /*
-   * Clone of get_symbol that doesn't take a buffer argument
-   */
-! struct tree *
-  get_tree(objid, objidlen, subtree)
-      oid     *objid;
-      int     objidlen;
-*** ucd-snmp-3.3/snmplib/mib.h	Wed Oct 29 20:43:38 1997
---- ucd-snmp-3.3.new/snmplib/mib.h	Wed Nov 19 15:16:26 1997
-*************** void print_description __P((oid *, int))
-*** 272,274 ****
---- 272,276 ----
-  void fprint_description __P((FILE *, oid *, int));
-  int get_module_node __P((char *, char *, oid *, int *));
-  int get_node __P((char *, oid *, int *));
-+ struct tree *get_symbol __P((oid *, int, struct tree *, char *));
-+ struct tree *get_tree __P((oid *, int, struct tree *));
-*** ucd-snmp-3.3/win32/libsnmp_dll/libsnmp.def	Thu Nov 13 04:27:11 1997
---- ucd-snmp-3.3.new/win32/libsnmp_dll/libsnmp.def	Wed Nov 19 15:18:07 1997
-*************** EXPORTS
-*** 53,58 ****
---- 53,60 ----
-  	print_description
-  	get_module_node
-  	get_node
-+ 	get_symbol
-+ 	get_tree
-  	find_node
-  	read_module
-  	read_mib
-------
-
-------
 
 Trouble Shooting:
 
@@ -363,18 +564,34 @@ and maybe I can help.
 please give sufficient information to analyze the problem (OS type,
 versions for OS/Perl/UCD/compiler, complete error output, etc.)
 
-------
+Acknowledments:
 
 Many thanks to all those who supplied patches, suggestions and
-feedback. This may actually turn out to be a decent package with such
-excellent help and the fact that I have more time to work on it than
-in the past. Apologies to any/all who's patch/feature/request was not
+feedback. 
+
+Wes Hardaker and the ucd-coders
+Dave Perkins
+Marcel Wiget
+David Blackburn
+John Stofell
+Gary Hayward
+Claire Harrison
+Achim Bohnet
+Doug Kingston
+Jacques Vidrine
+Perl5 Porters
+
+Apologies to any/all who's patch/feature/request was not mentioned or
 included - most likely it was lost when paying work intruded on my
-fun. Please try again if you do not see a desired feature.
+fun. Please try again if you do not see a desired feature. This may
+actually turn out to be a decent package with such excellent help and
+the fact that I have more time to work on it than in the past.
 
 bugs, comments, questions to gmarzot@baynetworks.com
 
 ------
+History:
+
 Bugs fixed and changes in 1.7
 
 1) fixed seg fault on use of unknown/unparsed attribute in Varbind or
@@ -385,7 +602,7 @@ Bugs fixed and changes in 1.7
 3) handles variable args to setMib without complaint
 
 4) added SNMP::getType to query data type of a given attribute and
-   extended Varbind structure to hold type as well
+   extended Varbind structure to return type wherever possible
 
 5) added RemotePort to SNMP::Session initialation list to allow override
    of port 161
@@ -400,17 +617,24 @@ Bugs fixed and changes in 1.7
 
 8) Session now sets ErrorInd (e.g., $session->{ErrorInd}) where appropriate
 
-9) Fully qualified attriubute names and numeric OIDs are now valid <obj>
+9) Support for ucd-snmp-3.2 (and greater) style of Mib loading
+
+10) Fully qualified attriubute names and numeric OIDs are now valid <obj>
    defintions.
 
-10) Numeric OIDs can be used even if they have not been parsed in the
-    current Mib (note: <type> must be supplied)
+11) Numeric OIDs can be used even if they have not been parsed in the
+    current Mib - Mib loading is now optional
 
-11) Support for Win32 perl
+12) Support for Win32 perl
 
-12) Updated docs and examples
+13) Updated docs and examples
 
-13) Reworked/extended the test harness to use the perl t/* facility
+14) Reworked/extended the test harness to use the perl t/* facility
     (thanks to jfs@fluent.com)
 
+15) fixed up error handling to be more consistent with library and more
+    useful in general. Now returns both library API errors and snmp
+    protocol error numbers and strings.
 
+16) added per object and per type formatting of returned values - more
+    control of value formatting with UseEnums and UseSprintValue

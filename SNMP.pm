@@ -232,7 +232,7 @@ sub set {
      my $val = shift;
      $varbind_list_ref = [[$tag, $iid, $val]];
    }
-
+   # BUG --- Use of uninitialized value w/ no agent present --- BUG
    $res = SNMP::_set($this, $varbind_list_ref);
 
 }

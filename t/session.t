@@ -13,12 +13,10 @@ use SNMP 1.7;
 
 my($host,$comm);
 if (-f 'host') {
-  ($host, $comm) = split(' ',`cat host`);
-  $comm ||= 'public';
-} else {
-  print "1..0\n";
-  exit 0;
+   ($host, $comm) = split(' ',`cat host`);
 }
+$host ||= 'localhost';
+$comm ||= 'private';
 
 $SNMP::verbose = 0;
 $n = 14;  # Number of tests to run
@@ -58,9 +56,6 @@ printf "%s %d\n", ($s1) ? "ok" :"not ok", $n++;
 # Get the standard Vars and check that we got some back
 @ret = $s1->get($vars);
 printf "%s %d\n", (@ret) ? "ok" :"not ok", $n++;
-#foreach (@{$vars}) {
-#    print STDERR $_->tag,".",$_->iid," = ", $_->val," [",$_->type,"]\n";
-#}
 
 ######################################################################
 # Check that we got back the number we asked for.
@@ -72,7 +67,6 @@ printf "%s %d\n", ($#ret == $#{$vars}) ? "ok" :"not ok", $n++;
 # Save the original sysContact.0 name
 $orig_name = $s1->get('sysContact.0');
 printf "%s %d\n", defined($orig_name) ? "ok" :"not ok", $n++;
-#print STDERR "TESTING GET $orig_name\n";
 ######################################################################
 # Change to another name
 my $res1 = $s1->set('sysContact.0', $name);
@@ -81,8 +75,7 @@ printf "%s %d\n", ($res1 == 0) ? "ok" :"not ok", $n++;
 ######################################################################
 # Get the new name and make sure it matches
 my $new = $s1->get('sysContact.0');
-printf "%s %d\n", ($new eq $name) ? "ok" :"not ok", $n++;
-#print STDERR "($new), ($name), ($orig_name)\n";
+printf "%s %d\n", (defined($new) and $new eq $name) ? "ok" :"not ok", $n++;
 
 ######################################################################
 # reset to the original value
@@ -93,7 +86,6 @@ printf "%s %d\n", ($s1->{ErrorInd} == 0) ? "ok" :"not ok", $n++;
 # Try to change a read-only value
 $s1->set('sysUpTime.0', 0);
 printf "%s %d\n", ($s1->{ErrorInd} == 1) ? "ok" :"not ok", $n++;
-
 ######################################################################
 # getnext tests
 ######################################################################

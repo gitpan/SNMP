@@ -33,9 +33,8 @@
 #define SOCK_CLEANUP
 #define DLL_IMPORT
 #endif
-
+extern int Suffix;
 DLL_IMPORT extern struct tree *Mib;
-DLL_IMPORT extern int snmp_errno;
 
 #include "asn1.h"
 #include "snmp_api.h"
@@ -73,10 +72,12 @@ static int __concat_oid_str _((oid *, int *, char *));
 static void __add_var_val_str _((struct snmp_pdu *, oid *, int, char *,
                                  int, int));
 static int __send_sync_pdu _((struct snmp_session *, struct snmp_pdu *,
-                           struct snmp_pdu **, int , SV *, SV *, SV *));
-#define USE_LONG_NAMES 2
-#define FAIL_ON_NULL_IID 1
-#define NO_FAIL_ON_NULL_IID 0
+                              struct snmp_pdu **, int , SV *, SV *, SV *));
+
+#define NON_LEAF_NAME 0x04
+#define USE_LONG_NAMES 0x02
+#define FAIL_ON_NULL_IID 0x01
+#define NO_FLAGS 0x00
 
 typedef struct snmp_session SnmpSession;
 
@@ -121,7 +122,11 @@ char* typestr;
 	    return(TYPE_NETADDR);
 	if (!strncmp(typestr,"COUNTER64",3))
 	    return(TYPE_COUNTER64);
-
+	if (!strncmp(typestr,"NULL",3))
+	    return(TYPE_NULL);
+	if (!strncmp(typestr,"UINTEGER",3))
+	    return(TYPE_UINTEGER); /* historic - should not show up */
+                                   /* but it does?                  */
         return(TYPE_UNKNOWN);
 }
 
@@ -161,6 +166,7 @@ int type;
             return(TYPE_UINTEGER);
 	    break;
 	default:
+            warn("translate_asn_type: unhandled asn type (%d)\n",type);
             return(TYPE_OTHER);
             break;
         }
@@ -186,8 +192,7 @@ int flag;
      switch (var->type) {
         case ASN_INTEGER:
            if (flag == USE_ENUMS) {
-              /* !!!! NOTE not implemented yet NOTE!!!!*/
-              sprintf(buf,"%ld", *var->val.integer);
+	      sprint_value(buf, var->name, var->name_length, var);
               len = strlen(buf);
            } else {
               sprintf(buf,"%ld", *var->val.integer);
@@ -215,6 +220,9 @@ int flag;
           len = strlen(buf);
           break;
 
+        case ASN_NULL:
+           break;
+
         case OBJID:
           __sprint_num_objid(buf, (oid *)(var->val.objid),
                              var->val_len/sizeof(oid));
@@ -225,7 +233,7 @@ int flag;
         case ASN_BIT_STR:
         case NSAP:
         default:
-
+           warn("sprint_value: asn type not handled %d\n",var->type);
      }
    }
    return(len);
@@ -303,14 +311,19 @@ char * str;
 	case TYPE_COUNTER64:
        		strcpy(str, "COUNTER64");
 	        break;
-	case TYPE_OTHER:
 	case TYPE_NULL:
+                strcpy(str, "NULL");
+                break;
+	case TYPE_UINTEGER:
+                strcpy(str, "UINTEGER"); /* historic - should not show up */
+                                          /* but it does?                  */
+                break;
+	case TYPE_OTHER: /* not sure if this is a valid leaf type?? */
 	case TYPE_BITSTRING:
 	case TYPE_NSAPADDRESS:
-	case TYPE_UINTEGER:
         default: /* unsupported types for now */
-		strcpy(str, "");
-	return(FAILURE);
+           strcpy(str, "");
+           return(FAILURE);
    }
    return SUCCESS;
 }
@@ -351,7 +364,32 @@ int flag;
    if (!found_label || (!isdigit(*(icp+1)) && (flag & FAIL_ON_NULL_IID)))
       return(FAILURE);
 
-   if (*icp) *(icp++) = '\0';
+   if (flag & NON_LEAF_NAME) { /* dont know where to start instance id */
+     /* put the whole thing in label */
+     icp = &(name[len]);
+     flag |= USE_LONG_NAMES;
+     /* special hack in case no mib loaded - object identifiers will
+      * start with .iso.<num>.<num>...., in which case it is preferable
+      * to make the label entirely numeric (i.e., convert "iso" => "1")
+      */
+      if (*lcp == '.' && lcp == name) {
+         if (!strncmp(".ccitt.",lcp,7)) {
+            name += 2;
+            *name = '.';
+            *(name+1) = '0';
+         } else if (!strncmp(".iso.",lcp,5)) {
+            name += 2;
+            *name = '.';
+            *(name+1) = '1';
+         } else if (!strncmp(".joint-iso-ccitt.",lcp,17)) {
+            name += 2;
+            *name = '.';
+            *(name+1) = '2';
+         }
+      } 
+   } else if (*icp) {
+      *(icp++) = '\0';
+   }
    *last_label = (flag & USE_LONG_NAMES ? name : lcp);
    *iid = icp;
 
@@ -390,19 +428,18 @@ int  * type;
 
    if (type) *type = TYPE_UNKNOWN;
    if (oid_arr_len) *oid_arr_len = 0;
-   if (!tag || !*tag) return NULL;
+   if (!tag) goto done;
 
-   if (strchr(tag,'.')) { /* if multi part tag - either numeric or textual */
-      if (__scan_num_objid(tag, newname, &newname_len) ||
-          read_objid(tag, newname, &newname_len)) {
-         rtp = tp = get_tree(newname, newname_len, Mib);
-         if (type) *type = tp->type;
-         if ((oid_arr == NULL) || (oid_arr_len == NULL)) return rtp;
-         bcopy((char*)newname,oid_arr,newname_len*sizeof(oid));
-         *oid_arr_len = newname_len;
-         if (iid && *iid) __concat_oid_str(oid_arr, oid_arr_len, iid);
-         return(rtp);
+   if (strchr(tag,'.')) { /* if multi part tag  */
+      if (!__scan_num_objid(tag, newname, &newname_len)) {/* numeric tag */
+         newname_len = MAX_NAME_LEN;
+         read_objid(tag, newname, &newname_len); /* long name */
       }
+      if (newname_len) rtp = tp = get_tree(newname, newname_len, Mib);
+      if (type) *type = (tp ? tp->type : TYPE_UNKNOWN);
+      if ((oid_arr == NULL) || (oid_arr_len == NULL)) return rtp;
+      bcopy((char*)newname,oid_arr,newname_len*sizeof(oid));
+      *oid_arr_len = newname_len;
    } else { /* else it is a leaf */
       rtp = tp = find_node(tag, Mib);
       if (tp) {
@@ -417,11 +454,11 @@ int  * type;
          }
          *oid_arr_len = newname + MAX_OID_LEN - op;
          bcopy(op, oid_arr, (newname + MAX_OID_LEN - op) * sizeof(oid));
-         if (iid && *iid) __concat_oid_str(oid_arr, oid_arr_len, iid);
-         return rtp;
       }
    }
-   return NULL;
+ done:
+   if (iid && *iid) __concat_oid_str(oid_arr, oid_arr_len, iid);
+   return(rtp);
 }
 /* searches down the mib tree for the given oid
    returns the last found tp and its index in lastind
@@ -475,7 +512,7 @@ char * soid_str;
    char soid_buf[MAX_NAME_LEN*3];
    char *cp;
 
-   if (!soid_str || !*soid_str) return SUCCESS; /* successfully added nothing */
+   if (!soid_str || !*soid_str) return SUCCESS;/* successfully added nothing */
    if (*soid_str == '.') soid_str++;
    strcpy(soid_buf, soid_str);
    cp = strtok(soid_buf,".");
@@ -587,13 +624,7 @@ SV * err_str_sv;
 SV * err_num_sv;
 SV * err_ind_sv;
 {
-   int status, count;
-   struct variable_list *vars;
-   char str_buf[2048];
-   char err_buf[2048];
-   char *label;
-   char *iid;
-   long len;
+   int status;
    long command = pdu->command;
    *response = NULL;
 retry:
@@ -609,84 +640,48 @@ retry:
 	       break;
 
             case SNMP_ERR_NOSUCHNAME:
-	       for(count = 1, vars = (*response)->variables;
-                   vars && (count != (*response)->errindex);
-		   vars = vars->next_variable, count++); /*find bad varbind */
-
-               if (vars) {
-                  str_buf[0] = '\0'; label == NULL; iid = NULL;
-                  sprint_objid(str_buf, vars->name, vars->name_length);
-
-                  if ((__get_label_iid(str_buf, &label, &iid,
-                                            FAIL_ON_NULL_IID) == SUCCESS)
-	               && label && iid) {
-                     sprintf(err_buf, "NOSUCHNAME(%s.%s):", label, iid);
-                     sv_catpv(err_str_sv, err_buf);
-                     sv_setiv(err_num_sv, (*response)->errstat);
-                     sv_setiv(err_ind_sv, (*response)->errindex);
-                  }
-	       }
-               if (retry_nosuch && (command == GET_REQ_MSG) &&
-		   ((pdu = snmp_fix_pdu(*response, GET_REQ_MSG)) != NULL)) {
-			/* may need to free response here */
-                	goto retry;
+               if (retry_nosuch && (pdu = snmp_fix_pdu(*response, command))) {
+                  if (*response) snmp_free_pdu(*response);
+                  goto retry;
                }
 
-               break;
-
-	    case SNMP_ERR_TOOBIG:
-               sv_catpv(err_str_sv, "SNMP_ERR_TOOBIG:");
-               sv_setiv(err_num_sv, (*response)->errstat);
-	       sv_setiv(err_ind_sv, (*response)->errindex);
-               break;
+            /* Pv1, SNMPsec, Pv2p, v2c, v2u, v2*, and SNMPv3 PDUs */
+            case SNMP_ERR_TOOBIG:
             case SNMP_ERR_BADVALUE:
-               sv_catpv(err_str_sv, "SNMP_ERR_BADVALUE:");
-               sv_setiv(err_num_sv, (*response)->errstat);
-	       sv_setiv(err_ind_sv, (*response)->errindex);
-               break;
-	    case SNMP_ERR_READONLY:
-               sv_catpv(err_str_sv, "SNMP_ERR_READONLY:");
-               sv_setiv(err_num_sv, (*response)->errstat);
-	       sv_setiv(err_ind_sv, (*response)->errindex);
-               break;
-	    case SNMP_ERR_GENERR:
-               sv_catpv(err_str_sv, "SNMP_ERR_GENERR:");
-               sv_setiv(err_num_sv, (*response)->errstat);
-	       sv_setiv(err_ind_sv, (*response)->errindex);
-               break;
-	    case SNMP_ENDOFMIBVIEW:
-               sv_catpv(err_str_sv, "SNMP_ENDOFMIBVIEW:");
-               sv_setiv(err_num_sv, (*response)->errstat);
-	       sv_setiv(err_ind_sv, (*response)->errindex);
-	       break;
-            /* V2 exceptions - return what you can from response */
-	    case SNMP_NOSUCHINSTANCE:
-               sv_catpv(err_str_sv, "SNMP_NOSUCHINSTANCE:");
-               sv_setiv(err_num_sv, (*response)->errstat);
-	       sv_setiv(err_ind_sv, (*response)->errindex);
-               break;
-	    case SNMP_NOSUCHOBJECT:
-               sv_catpv(err_str_sv, "SNMP_NOSUCHOBJECT:");
-               sv_setiv(err_num_sv, (*response)->errstat);
-	       sv_setiv(err_ind_sv, (*response)->errindex);
-               break;
+            case SNMP_ERR_READONLY:
+            case SNMP_ERR_GENERR:
+            /* in SNMPv2p, SNMPv2c, SNMPv2u, SNMPv2*, and SNMPv3 PDUs */
+            case SNMP_ERR_NOACCESS:
+            case SNMP_ERR_WRONGTYPE:
+            case SNMP_ERR_WRONGLENGTH:
+            case SNMP_ERR_WRONGENCODING:
+            case SNMP_ERR_WRONGVALUE:
+            case SNMP_ERR_NOCREATION:
+            case SNMP_ERR_INCONSISTENTVALUE:
+            case SNMP_ERR_RESOURCEUNAVAILABLE:
+            case SNMP_ERR_COMMITFAILED:
+            case SNMP_ERR_UNDOFAILED:
+            case SNMP_ERR_AUTHORIZATIONERROR:
+            case SNMP_ERR_NOTWRITABLE:
+            /* in SNMPv2c, SNMPv2u, SNMPv2*, and SNMPv3 PDUs */
+            case SNMP_ERR_INCONSISTENTNAME:
             default:
+               sv_catpv(err_str_sv, snmp_errstring((*response)->errstat));
+               sv_setiv(err_num_sv, (*response)->errstat);
+	       sv_setiv(err_ind_sv, (*response)->errindex);
                break;
 	 }
          break;
 
       case STAT_TIMEOUT:
-         sv_catpv(err_str_sv, "SNMP_TIMEOUT:");
-         sv_setiv(err_num_sv, snmp_errno);
-         break;
       case STAT_ERROR:
-      /* status == STAT_ERROR snmp_errno == (GENERR|BAD_ADDRESS|BAD_SESSION) */
-      /* GENERR here appears to be a catch all for undefined V2 related errs */
-         sv_catpv(err_str_sv, "SNMP_ERROR:");
-         sv_setiv(err_num_sv, snmp_errno);
+         sv_catpv(err_str_sv, snmp_api_errstring(snmp_get_errno()));
+         sv_setiv(err_num_sv, snmp_get_errno());
          break;
 
       default:
+         sv_catpv(err_str_sv, "send_sync_pdu: unknown status");
+         sv_setiv(err_num_sv, snmp_get_errno());
          break;
    }
 
@@ -939,21 +934,28 @@ snmp_read_mib(mib_file, force=0)
 
         verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
 
-        if (SvIV(verbose)) warn("reading MIB: %s",(mib_file ? mib_file : ""));
+        
 
         /* if (Mib && force) __free_tree(Mib); needs more work to cleanup */
 
         if ((mib_file == NULL) || (*mib_file == '\0')) {
            if (Mib == NULL) {
-		init_mib();
+              if (SvIV(verbose)) warn("initializing MIB\n");
+              init_mib();
+              if (Mib) {
+                 if (SvIV(verbose)) warn("done\n");
+              } else {
+                 if (SvIV(verbose)) warn("failed\n");
+              }
 	   }
         } else {
+           if (SvIV(verbose)) warn("reading MIB: %s\n", mib_file);
 	   Mib = read_mib(mib_file);
-        }
-        if (Mib) {
-           if (SvIV(verbose)) warn("done\n");
-        } else {
-           if (SvIV(verbose)) warn("failed\n");
+           if (Mib) {
+              if (SvIV(verbose)) warn("done\n");
+           } else {
+              if (SvIV(verbose)) warn("failed\n");
+           }
         }
         RETVAL = (I32)Mib;
         }
@@ -1057,7 +1059,7 @@ snmp_set(sess_ref, varlist_ref)
                     if (type == TYPE_UNKNOWN) {
                       varbind_type_f = av_fetch(varbind,VARBIND_TYPE_F,0);
                       type = __translate_appl_type(
-                              (*varbind_type_f?SvPV(*varbind_type_f,na):NULL));
+                              (varbind_type_f?SvPV(*varbind_type_f,na):NULL));
                       if (type == TYPE_UNKNOWN) {
                          if (SvIV(verbose))
                             warn("error: set: no type found for object");
@@ -1078,7 +1080,7 @@ snmp_set(sess_ref, varlist_ref)
 
               if (response) snmp_free_pdu(response);
 
-	      XPUSHs(sv_2mortal(newSViv(snmp_errno)));
+	      XPUSHs(sv_2mortal(newSViv(snmp_get_errno())));
            } else {
 err:
               /* BUG!!! need to return an error value */
@@ -1199,7 +1201,7 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref)
                        tmp_sv = newSVpv(tmp_type_str,strlen(tmp_type_str));
                        av_store(varbind, VARBIND_TYPE_F, tmp_sv);
                        len=__sprint_value(str_buf,vars,tp,type,sprintval_flag);
-                       tmp_sv= newSVpv((char*)str_buf, len);
+                       tmp_sv=newSVpv((char*)str_buf, len);
                        av_store(varbind, VARBIND_VAL_F, tmp_sv);
                        XPUSHs(sv_mortalcopy(tmp_sv));
                     } else {
@@ -1249,6 +1251,7 @@ snmp_getnext(sess_ref, varlist_ref)
 	   char str_buf[2048];
            char *label;
            char *iid;
+           char *cp;
            int getlabel_flag = FAIL_ON_NULL_IID;
            int sprintval_flag;
            SV* verbose;
@@ -1267,7 +1270,7 @@ snmp_getnext(sess_ref, varlist_ref)
               sv_setiv(*err_num_svp, 0);
               sv_setiv(*err_ind_svp, 0);
 	      if (SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseLongNames", 12, 1)))
-                 getlabel_flag &= USE_LONG_NAMES;
+                 getlabel_flag |= USE_LONG_NAMES;
 	      if (SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseEnums", 8, 1)))
                  sprintval_flag = USE_ENUMS;
 	      if (SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseSprintValue", 14, 1)))
@@ -1286,14 +1289,7 @@ snmp_getnext(sess_ref, varlist_ref)
                     __tag2oid((varbind_tag_f ? SvPV(*varbind_tag_f,na):"0"),
                               (varbind_iid_f ? SvPV(*varbind_iid_f,na):NULL),
                               oid_arr, &oid_arr_len, NULL);
-                    if (oid_arr_len) {
-                       snmp_add_null_var(pdu, oid_arr, oid_arr_len);
-                    } else {
-                       /*BUG!!!if we skip one, the response will be off by 1*/
-                       if (SvIV(verbose))
-                          warn("getnext: unable to determine oid for object");
-                       snmp_add_null_var(pdu, oid_arr, oid_arr_len);
-                    }
+                    snmp_add_null_var(pdu, oid_arr, oid_arr_len);
                  } /* if var_ref is ok */
               } /* for all the vars */
 
@@ -1312,15 +1308,17 @@ snmp_getnext(sess_ref, varlist_ref)
                     vars = last_vars;
 
 		    if (vars) {
+                       *str_buf = '.';
                        tp =
-                         get_symbol(vars->name,vars->name_length,Mib,str_buf);
+                        get_symbol(vars->name,vars->name_length,
+                                   get_tree_head(),str_buf+1);
                        if (__is_leaf(tp)) {
-                          __get_label_iid(str_buf,&label,&iid,getlabel_flag);
                           type = tp->type;
                        } else {
+                          getlabel_flag |= NON_LEAF_NAME;
                           type = __translate_asn_type(vars->type);
                        }
-
+                       __get_label_iid(str_buf,&label,&iid,getlabel_flag);
                        av_store(varbind, VARBIND_TAG_F,
                                  newSVpv(label, strlen(label)));
                        av_store(varbind, VARBIND_IID_F,
@@ -1329,7 +1327,7 @@ snmp_getnext(sess_ref, varlist_ref)
                        tmp_sv = newSVpv(tmp_type_str, strlen(tmp_type_str));
 	      	       av_store(varbind, VARBIND_TYPE_F, tmp_sv);
                        len=__sprint_value(str_buf,vars,tp,type,sprintval_flag);
-                       tmp_sv = newSVpv((char*)str_buf, len);
+                       tmp_sv=newSVpv((char*)str_buf, len);
                        av_store(varbind, VARBIND_VAL_F, tmp_sv);
                        XPUSHs(sv_mortalcopy(tmp_sv));
                     } else {
@@ -1421,18 +1419,15 @@ snmp_translate_obj(var,mode,use_long)
                 } else {
                    status = __sprint_num_objid(str_buf, oid_arr, oid_arr_len);
                 }
-                RETVAL = str_buf;
                 break;
              case SNMP_XLATE_MODE_OID2TAG:
 		oid_arr_len = 0;
 		__concat_oid_str(oid_arr, &oid_arr_len, var);
-		str_buf[0] = '\0';
-                label = NULL;
-                iid = NULL;
 		sprint_objid(str_buf, oid_arr, oid_arr_len);
 		if (!use_long) {
+                  label = NULL; iid = NULL;
 		  if (((status=__get_label_iid(str_buf,
-		       &label, &iid, NO_FAIL_ON_NULL_IID)) == SUCCESS)
+		       &label, &iid, NO_FLAGS)) == SUCCESS)
 		      && label) {
 		     strcpy(str_buf, label);
 		     if (iid && *iid) {
@@ -1441,12 +1436,11 @@ snmp_translate_obj(var,mode,use_long)
 		     }
  	          }
 	        }
-                RETVAL = str_buf;
                 break;
              default:
 	       if (SvIV(verbose)) warn("unknown translation mode: %s\n", mode);
-      	       RETVAL = NULL;
            }
+           RETVAL = str_buf;
 	}
         OUTPUT:
         RETVAL

@@ -5,7 +5,7 @@ general select loop (and/or EventDrivenServer) This would really be
 easier and more reliable/compatible if/when event handling is moved to
 the perl core.
 
-allow unloading and reinitialization of parsed MIB 
+allow unloading and reinitialization of parsed MIB (change to ucd-snmp?)
 
 allow MIB use on a per Session basis (ie. dependent on agent type and
 version, loaded mib might be different (yes I know properly designed
@@ -21,6 +21,8 @@ implement more v2-isms. and v3 isms?
 add trap generation/handling
 
 ensure module does not complain with -w.
+
+add more tests
 
 add POD docs to SNMP.pm (I have some patches around someplace for this)
 
