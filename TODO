@@ -1,0 +1,23 @@
+allow argument to set/get/getNext to be a numeric OID in addition to a
+'tag.iid'. if the input arg is a numeric OID then getNext would return a
+numeric OID as well.
+
+add a 'getType' method to lookup SNMP type(syntax) for a given object so
+some formatting of retrieved value can be done for packed types like
+(OCT_STR, IP_ADDR, OID etc.) currently you must know what type you are
+getting back and unpack accordingly.
+
+I think the error handling is fixed now - but it could use some
+validation/going over. See that informative strings are returned and the
+the error number is useful in all cases.
+
+implement an asynchronous interface so multiple requests can be sent out
+and responses can be handled with a call-back.
+
+implement more v2-isms. (assuming some stability and consensus on what
+that is)
+
+
+
+
+

@@ -1,0 +1,10 @@
+BUG
+MANIFEST
+MANIFEST.SKIP
+Makefile.PL
+README
+SNMP.pm
+SNMP.xs
+TODO
+test/mib.txt
+test/snmptest.pl

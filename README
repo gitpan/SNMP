@@ -1,0 +1,88 @@
+		   Perl5 CMU-SNMPv2 Extension Module
+		  G.S.Marzot(gmarzot@baynetworks.com)
+				9/25/95
+
+Introduction:
+
+This is a Perl5 extension module which provides an interface to the
+CMU-SNMPv2 library. It was developed on a linux box and tested on a
+sun4_4.1 system using CMU-SMNMPv2.1.2. There have been reports of
+success on irix and solaris systems so far. (Let me know of problems
+and/or successes on other boxes please)
+
+the most recent version of the module can be retrieved from
+ftp:/ftp.wellfleet.com/netman/snmp/perl5/SNMP.tar.gz
+(as well as the usual perl archives)
+
+cmu source may be found in a variety of locations, try
+ftp://ftp.ece.ucdavis.edu/pub/snmp (sun, hp port etc.)
+ftp://sunsite.unc.edu:/pub/Linux/system/Network/admin (linux)
+
+
+Description:
+
+The basic operations offered by SNMP are provided through an object
+oriented interface for modularity and ease of use. The primary object is
+SNMP::Session which is implemented as a blessed hash reference. The
+object supports 'get', 'set', and 'getNext' method calls. All calls are
+blocking/synchronous (i.e., they must recieve a response or timeout
+before control is returned to the caller). The methods take a variety of
+input argument formats(see test/snmptest.pl for examples). A description
+of the objects data fields follow.
+
+SNMP::Session
+ DestHost - required on creation, either hostname or ip addr of SNMP agent
+ Community - default 'public', SNMP community string
+ Version - default '1', v1 support only for now
+ Timeout - default '1000000', micro-seconds before retry
+ Retries - default '5', retries before failure
+ RetryNoSuch - default '1', for get request NOSUCH errors, the pdu will
+               be repaired, removing the varbind in error, and resent -
+               undef will be returned for all NOSUCH varbinds, setting
+               to '0' disables this feature and the entire get request
+               will fail on any NOSUCH error
+ ErrorStr - read-only, returns a test description of any error occuring
+            in the last request
+ ErrorNum - read-only, returns the snmp_err or staus of last request
+private
+ DestAddr - internal field used to hold the translated DestHost field
+
+In addition a number of package variables and methods are provided
+
+$SNMP::release - the current version specifier (e.g., 1.5b)
+
+$SNMP::auto_init_mib - default '1', enables the immediate loading of the
+                       ASN mib when the package is loaded - if set to '0'
+                       mib loading must be done explicitly (see SNMP::setMib)
+
+SNMP::setMib - allows dynamic re-initialization of the mib to be used
+
+SNMP::translateObj - will convert a text object tag to a numeric OID and
+                     vice-versa. iid suffix is always retained numerically
+
+
+Installation:
+
+build/install version 2.1.2 of CMU-SNMPv2 libsnmp.a (e.g., /usr/local/lib)
+
+make sure header files are available someplace (e.g., /usr/local/include)
+
+in ext/SNMP 'perl Makefile.PL'
+
+then 'make install'
+
+the CMU tool-kit requires that an ASN mib be available. 'mib.txt' is the
+default name looked for first in the local directory and then in
+/etc. See CMU-SNMP docs for details on overriding the default or set mib
+explicitly with SNMP::setMib.
+
+assuming you have an SNMP agent to talk to you can customize test/snmptest.pl
+and run
+
+'cd test; perl snmptest.pl <agent-address>'
+
+------
+Many thanks to those in the Perl community and perl5-porters list who
+helped.
+
+bugs, comments, questions to gmarzot@baynetworks.com

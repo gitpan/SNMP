@@ -1,0 +1,202 @@
+In Makefile.PL something like this (untested):
+
+use ExtUtils::MakeMaker;
+require 5.001;
+%X = initialize();
+WriteMakefile( %X );
+
+sub initialize {
+    my %X=(
+	NAME       => "SNMP",
+	"dist"     => { SUFFIX   => "gz", DIST_DEFAULT => 'all uutardist',
+			    COMPRESS => "gzip -9f",
+			},
+       );
+    my @headerfiles= qw[
+asn1.h
+mib.h
+parse.h
+snmp.h
+snmp_api.h
+snmp_client.h
+snmp_impl.h
+acl.h
+party.h
+view.h
+md5.h
+context.h
+system.h
+];
+
+    my @headerdirs = qw[/usr/include/snmplib /usr/local/include/snmplib];
+
+    my $headerdir = find_files(\@headerfiles,\@headerdirs) ||
+	prompt("Where are the headerfiles for snmp installed?");
+    my $libdir = find_files(["libsnmp.a"],[qw[/usr/lib /usr/local/lib]]) ||
+	prompt("Where is the libsnmp.a file installed?");
+
+    
+    @headerfiles = grep($_="$headerdir/$_", @headerfiles);
+    $X{LIBS}     = "-L$libdir -lsnmp";
+    $X{INC}      = "-I$headerdir";
+    $X{H}        = \@headerfiles;
+    $X{VERSION}  = 0.83;
+    %X;
+}
+
+
+sub find_files {
+    my($f,$d) = @_;
+    my ($dir,$found,$file);
+    for $dir (@$d){
+	$found = 0;
+	for $file (@$f) {
+	    $found++ if -f "$dir/$file";
+	}
+	if ($found == @$f) {
+	    return $dir;
+	}
+    }
+}
+
+__END__
+
+While I was writing this, the first 68kB of your SNMP.tgz got
+transferred, so it will take some time till I can play with it :(
+
+andreas
+  >From: gmarzot@BayNetworks.com (Joe Marzot)
+  >
+  >    ak> Success! (I think)
+  >
+  >that's amazing, I did not think anyone would be able to install it in the
+  >state it was in.
+  >
+  >    ak> I can run the test script snmptest/.pl and it actually does
+  >    ak> something. I cannot judge, if it behaves as it should, but it puts
+  >    ak> something out. Let me know if you're interested in the output.
+  >
+  >sure, send it along but I do doubt you could get anything useful unless
+  >you have a wellfleet router to talk to. are you talking to some host
+  >running a SNMP agent?
+
+I haven't yet had a look at the test script :) yes -- I'm embarrassed
+
+I append the output of the script to this message. I produced it with
+
+..../snmp/SNMP/test# perl -I../blib snmptest.pl >& snmptest.pl.out
+
+We don't have dedicated routers, we have unix boxes doing the work of
+routers and one machine runs ka9q, don't even know if it talks snmp.
+
+  >
+  >    ak> So now I have to dig into snmp...
+  >
+  >what do you need to dig?
+
+I will have to write scripts that watch our network and produces some
+interesting statistics. That's what I have promised to do. I'd be
+grateful to see any trivial snippets of useful snmp code. I have
+Stallings' book here, so I can look up a lot of things, but I prefer
+code that is actually used somewhere.
+
+I'm going to read the test script right now, if you accept this as an apology.
+
+  >
+  >    ak> Problems? No.
+  >
+  >    ak> Wishes? Yes: Please, take advantage of the wonderful Makefile that you
+  >    ak> get for free! Run make manifest, then edit the MANIFEST file so it
+  >    ak> really only contains the files that are needed for the distribution,
+  >    ak> and put together your next distribution with make dist. Don't
+  >    ak> distribute the header files and *~ files. Customize the MANIFEST
+  >    ak> trickery with a MANIFEST.SKIP file (see perldoc ExtUtils::MakeMaker
+  >    ak> and search for Distribution Support). Then I see that my work is
+  >    ak> really paying off :)
+  >
+  >I will look into this - (see perldoc ExtUtils::MakeMaker and search for
+  >Distribution Support) - how do I look at these docs?
+
+If you have 5.001m, you just say
+
+% perldoc ExtUtils::MakeMaker
+
+and you should page through the documentation just as if it were an
+ordinary manpage.
+
+  >    ak> PS: I haven't got any mail for hours, so something is broken at the
+  >    ak>     moment, I just don't see where.
+  >
+  >let me know if you do not get this message :0
+
+:--) still very strange zero activity on my mailing lists. For many
+hours now. Neither perl5-porters nor ptk nor msql show any sign of
+life. We'll see.
+
+  >
+  >-GSM
+  >
+
+-----
+
+I tried to compile SNMP-1.4 on OSF/1 V3.0 using perl5.001m and
+cmu-snmp-2.1.2-current.tgz.
+Unfortunately I got a seg. fault (see end of mail) when I tried to use
+snmptest.pl. I hopefully have some time this evening to look more
+closely into the problems. In the meantime here are my 3 cents:
+
+
+	- unpack into a directory including version number
+		SNMP-1.4/
+	  could be done by makemaker: make dist. In Makefile.PL
+	  you use VERSION => '0.1' which would produce a SNMP-0.1 :-(
+
+	  If the software is not stable add alpha or beta software
+	  switch at the end e.g., SNMP-1.4b3.tar.gz
+
+	- Add a MANIFEST.SKIP to exclude *~ *.o 
+		\.o$
+		~$
+		^Makefile$
+		...
+	  see perldoc MakeMaker for details.
+
+	- add a note where to find libsnmp or at least the name
+	  of the distribution to save archie a lot of searching
+	  (searching for 'snmp' failed, 'cmu-smnp' pointed me to
+	  some FTP archives.
+
+	- Wish: would be nice if you could add a make test target
+
+	- Compilation warning:
+...
+/usr/local/bin/perl -I/usr/local/lib/perl5/alpha-dec_osf -I/usr/local/lib/perl5 /usr/local/lib/perl5/ExtUtils/xsubpp -typemap /usr/local/lib/perl5/ExtUtils/typemap SNMP.xs >SNMP.tc && mv SNMP.tc SNMP.c
+cc -c -DSTANDARD_C -I/usr/local/include -O2 -Olimit 2900  -I/usr/local/lib/perl5/alpha-dec_osf/CORE   SNMP.c
+/usr/lib/cmplrs/cc/cfe: Warning: SNMP.c, line 261: Incompatible pointer type assignment
+         vars->val.string = (char *)malloc(len);
+ -------------------------^
+/usr/lib/cmplrs/cc/cfe: Warning: SNMP.c, line 979: Incompatible pointer type assignment
+                             tmp_sv = newSVpv(vars->val.string, vars->val_len);
+                        -------------------------------^
+/usr/lib/cmplrs/cc/cfe: Warning: SNMP.c, line 1299: Incompatible pointer type assignment
+                             tmp_sv = newSVpv(vars->val.string, vars->val_len);
+                        -------------------------------^
+Running Mkbootstrap for SNMP ()
+chmod 644 SNMP.bs
+ar cr tmp.a SNMP.o
+...
+
+Unfortunately if I run perl -d snmpperl.pl I get a seg. fault. Maybe I find
+the time to look into the problem:
+
+Automatic Mib Initialization: ENABLED
+
+main::(snmptest.pl:15): $session = new SNMP::Session ( DestHost => $host, Community => public );
+  DB<1> n
+Segmentation fault
+
+
+Any suggestions welcome.
+
+So long,
+Achim
