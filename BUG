@@ -1,8 +1,10 @@
 
-1) Memory leak (have not seen this lately)
+Hi, Joe,
 
-The following snippet used to grow in memory (and may still) - please
-notify me if anyone still observes this and even better has a fix.
+I finally sat down and wrote my first SNMP Program. Was much easier
+that expected. Nice work! Although, as the Subject line indicates, we
+have a problem here:
+
 
 perl -le '
 use SNMP;
@@ -12,3 +14,59 @@ print $obj->get(["ifNumber",0]);
 }
 '
 
+
+This program grows rapidly.
+
+I know, this doesn't happen in the *.pm code. This happens in the *xs
+files.
+
+Nonetheless I looked into both and found a couple of global variables
+which seem to be intended as lexical ones. I append the diffs. Let me
+know what you think about the leak. I see a malloc on oid_arr which
+has no corresponding free, I fixed this, but it still grows. The same
+fix seems appropriate in getnext. There's still a malloc for
+session. As I said, let me know...
+
+Regards,
+andreas
+
+
+Index: SNMP.pm
+*** SNMP-1.5b/SNMP.pm	Wed Sep 27 07:00:50 1995
+--- SNMP-1.5b.mine/SNMP.pm	Wed Nov  8 13:05:00 1995
+***************
+*** 4,14 ****
+  require DynaLoader;
+  require AutoLoader;
+  
+! @ISA = qw(Exporter Autoloader DynaLoader);
+  # Items to export into callers namespace by default. Note: do not exportsafefree(oid_arr);
+  	}
+  
+  int
+---------------------
+
+
+> >but the set test causes a segmentation fault.
+> 
+> can you give me anymore info on this - I have not seen any segfault with
+> the set operation either on sun or linux
+
+    I have some more information on this. We have upgraded our version of
+gcc to 2.7.0 and recompiled both perl5 and the SNMP module. It made no
+difference. On further investigation, it turns out the problem arises
+from your code in the __construct_oid routine. It blows up when attempting
+to set an undefined MIB variable. The lines in question are:
+
+	   if (tag && *tag) tp = find_node(tag, Mib);
+	   if (type) *type = tp->type;
+
+When I run this code, tag is "wfSysContact" and type is 28. However, my
+account defines a MIBFILE environment variable that points to our MIB;
+which does not define "wfSysContact". Hence find_node returned a null
+pointer and the second line goes BOOM.
+-------
+Bruce A. Hudson				| Bruce.Hudson@Dal.CA
+UCIS, Communications Services		| hudson@nstn.ca
+Dalhousie University			|
+Halifax, Nova Scotia, Canada		| (902) 494-3405
