@@ -66,20 +66,26 @@ bootstrap SNMP;
 # Package variables
 $auto_init_mib = 1; # enable automatic MIB loading at session creation time
 $use_long_names = 0; # non-zero to prefer longer mib textual identifiers rather
-                     # than just leaf indentifiers (see translateObj)
-                     # may also be set on a per session basis
+                   # than just leaf indentifiers (see translateObj)
+                   # may also be set on a per session basis(see UseLongNames)
 $use_sprint_value = 0; # non-zero to enable formatting of response values
                    # using the snmp libraries "sprint_value"
-                   # may also be set on a per session basis
+                   # may also be set on a per session basis(see UseSprintValue)
                    # note: returned values not suitable for 'set' operations
 $use_enums = 0; # non-zero to return integers as enums and allow sets
                 # using enums where appropriate - integer data will
                 # still be accepted for set operations
-                # may also be set on a per session basis
-%MIB = ();      # tied hash to library internal mib tree structure from
-                # parsed mib (seepackage SNMP::MIB for 
-$verbose = 0; # non-zero for debugging and status output from SNMP module
+                # may also be set on a per session basis (see UseEnums)
+%MIB = ();      # tied hash to access libraries internal mib tree structure
+                # parsed in from mib files
+$verbose = 0;   # controls warning/info output of SNMP module, 
+                # 0 => no output, 1 => enables warning and info
+                # output from SNMP module itself (is also controlled
+                # by SNMP::debugging)
 $debugging = 0; # non-zero to globally enable libsnmp do_debugging output
+                # set to >= 2 to enabling packet dumping (see below)
+$dump_packet = 0; # non-zero to globally enable libsnmp dump_packet output.
+                  # is also enabled when $debugging >= 2
 $save_descriptions = 0; #tied scalar to control saving descriptions during
                # mib parsing - must be set prior to mib loading
 
@@ -140,14 +146,16 @@ sub translateObj {
 # (i.e., sysDescr => '.1.3.6.1.2.1.1.1' and '.1.3.6.1.2.1.1.1' => sysDescr)
 # when $SNMP::use_long_names or second arg is non-zero the translation will
 # return longer textual identifiers (e.g., system.sysDescr)
+# if Mib is not loaded and $SNMP::auto_init_mib is enabled Mib will be loaded
+# returns 'undef' upon failure
    my $obj = shift;
    my $long_names = shift || $SNMP::use_long_names;
    my $res;
    if ($obj =~ /^\.?(\d+\.)*\d+$/) {
       $res = SNMP::_translate_obj($obj,1,$long_names,$SNMP::auto_init_mib);
-   } elsif ($obj =~ /(\w+)+(\.\d+)*$/) {
+   } elsif ($obj =~ /(\w+)(\.\d+)*$/) {
       $res = SNMP::_translate_obj($1,0,$long_names,$SNMP::auto_init_mib);
-      $res .= $2 if defined $2;
+      $res .= $2 if defined $res and defined $2;
    }
 
    return($res);
@@ -162,10 +170,27 @@ sub getType {
 }
 
 sub mapEnum {
-  my $varbind = shift;
-
-  # SNMP::_map_enum($varbind->[$SNMP::Varbind::tag_f]);
+# return the corresponding integer value *or* tag for a given MIB attribute
+# and value. The function will sense which direction to perform the conversion
+# various arg formats are supported
+#    $val = SNMP::mapEnum($varbind); # note: will update $varbind
+#    $val = SNMP::mapEnum('ipForwarding', 'forwarding');
+#    $val = SNMP::mapEnum('ipForwarding', 1);
+#
+  my $var = shift;
+  my ($tag, $val, $update);
+  if (ref($var) =~ /ARRAY/ or ref($var) =~ /Varbind/) {
+      $tag = $var->[$SNMP::Varbind::tag_f];
+      $val = $var->[$SNMP::Varbind::val_f];
+      $update = 1;
+  } else {
+      $tag = $var;
+      $val = shift;
+  }
+  my $res = SNMP::_map_enum($tag, $val, $val =~ /^\d+$/);
+  if ($update and defined $res) { $var->[$SNMP::Varbind::val_f] = $res; }
 }
+
 %session_params = (DestHost => 1,
 		   Community => 1,
 		   Version => 1,
@@ -200,7 +225,6 @@ sub snmp_get {
 }
 
 sub snmp_getnext {
-
 # procedural form of 'getnext' method. sometimes quicker to code 
 # but is less efficient since the Session is created and destroyed
 # with each call. Takes all the parameters of both SNMP::Session::new and
@@ -222,7 +246,6 @@ sub snmp_set {
     my $sess = new SNMP::Session(@sess_params);
 
     $sess->set(@_);
-
 }
 
 sub snmp_trap {
@@ -235,7 +258,6 @@ sub snmp_trap {
     my $sess = new SNMP::TrapSession(@sess_params);
 
     $sess->trap(@_);
-
 }
 
 sub MainLoop {
@@ -308,6 +330,7 @@ sub new {
 }
 
 sub update {
+# *Not Implemented*
 # designed to update the fields of session to allow retargettinf to different
 # host, community name change, timeout, retry changes etc. Unfortunately not
 # working yet because some updates (the address in particular) need to be 
@@ -372,7 +395,6 @@ sub set {
    my $cb = shift;
 
    $res = SNMP::_set($this, $varbind_list_ref, $cb);
-   # BUG --- Use of uninitialized value w/ no agent present --- BUG
 }
 
 sub get {
@@ -404,7 +426,6 @@ sub fget {
    my $vars = shift;
    my ($varbind_list_ref, @res);
 
-
    if (ref($vars) =~ /SNMP::VarList/) {
      $varbind_list_ref = $vars;
    } elsif (ref($vars) =~ /SNMP::Varbind/) {
@@ -422,11 +443,10 @@ sub fget {
    SNMP::_get($this, $this->{RetryNoSuch}, $varbind_list_ref, $cb);
 
    foreach $varbind (@$varbind_list_ref) {
-     if ($sub = $this->{VarFormats}{$varbind->[$SNMP::Varbind::tag_f]}) {
-       push(@res, $varbind->[$SNMP::Varbind::val_f] = &$sub($varbind));
-     } elsif ($sub = $this->{TypeFormats}{$varbind->[$SNMP::Varbind::type_f]}){
-       push(@res, $varbind->[$SNMP::Varbind::val_f] = &$sub($varbind));
-     }
+     $sub = $this->{VarFormats}{$varbind->[$SNMP::Varbind::tag_f]} ||
+	 $this->{TypeFormats}{$varbind->[$SNMP::Varbind::type_f]};
+     &$sub($varbind) if defined $sub;
+     push(@res, $varbind->[$SNMP::Varbind::val_f]);
    }
 
    return(wantarray() ? @res : $res[0]);
@@ -452,6 +472,37 @@ sub getnext {
    my $cb = shift;
 
    @res = SNMP::_getnext($this, $varbind_list_ref, $cb);
+
+   return(wantarray() ? @res : $res[0]);
+}
+
+sub fgetnext {
+   my $this = shift;
+   my $vars = shift;
+   my ($varbind_list_ref, @res);
+
+   if (ref($vars) =~ /SNMP::VarList/) {
+     $varbind_list_ref = $vars;
+   } elsif (ref($vars) =~ /SNMP::Varbind/) {
+     $varbind_list_ref = [$vars];
+   } elsif (ref($vars) =~ /ARRAY/) {
+     $varbind_list_ref = [$vars];
+     $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
+   } else {
+     my ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
+     $varbind_list_ref = [[$tag, $iid]];
+   }
+
+   my $cb = shift;
+
+   SNMP::_getnext($this, $varbind_list_ref, $cb);
+
+   foreach $varbind (@$varbind_list_ref) {
+     $sub = $this->{VarFormats}{$varbind->[$SNMP::Varbind::tag_f]} ||
+	 $this->{TypeFormats}{$varbind->[$SNMP::Varbind::type_f]};
+     &$sub($varbind) if defined $sub;
+     push(@res, $varbind->[$SNMP::Varbind::val_f]);
+   }
 
    return(wantarray() ? @res : $res[0]);
 }
@@ -628,20 +679,31 @@ sub new {
 #}
 
 package SNMP::DEBUGGING;
-
+# controls info/debugging output from SNMP module and libsnmp
+# $SNMP::debugging == 1    =>   enables general info and warning output
+#                                (eqiv. to setting $SNMP::verbose)
+# $SNMP::debugging == 2    =>   enables do_debugging from libsnmp as well
+# $SNMP::debugging == 3    =>   enables packet_dump from libsnmp as well
 sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }
 
 sub FETCH { $$_[0]; }
 
 sub STORE { 
-  SNMP::_set_debugging($_[1]); 
-  SNMP::_dump_packet($_[1]>1); 
-  $$_[0] = $_[1]; 
+    $SNMP::verbose = $_[1];
+    SNMP::_set_debugging($_[1]>1); 
+    $SNMP::dump_packet = ($_[1]>2); 
+    $$_[0] = $_[1]; 
 }
 
-sub DELETE { SNMP::_set_debugging(0); SNMP::_dump_packet(0); $$_[0] = 0; }
+sub DELETE { 
+    $SNMP::verbose = 0; 
+    SNMP::_set_debugging(0); 
+    $SNMP::dump_packet = 0; 
+    $$_[0] = undef; 
+}
 
 package SNMP::DUMP_PACKET;
+# controls packet dump output from libsnmp
 
 sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }
 
@@ -674,7 +736,10 @@ sub DELETE {
     delete $_[0]->{$_[1]}; # just delete cache entry
 }
 
-sub FIRSTKEY { return '.1'; }
+sub FIRSTKEY { return '.1'; } # this should actually start at .0 but
+                              # because nodes are not stored in lexico
+                              # order in ucd-snmp node tree walk will
+                              # miss most of the tree
 sub NEXTKEY { # this could be sped up by using an XS __get_next_oid maybe
    my $node = $_[0]->FETCH($_[1])->{nextNode};
    $node->{objectID};  
@@ -725,10 +790,10 @@ sub CLEAR {
     warn "CLEAR(@_): write access to MIB node not implemented\n";
 }
 
-sub DESTROY {
-    warn "DESTROY(@_): write access to MIB node not implemented\n";
-    # print "SNMP::MIB::NODE::DESTROY : $_[0]->{label} ($_[0])\n";
-}
+#sub DESTROY {
+#    warn "DESTROY(@_): write access to MIB node not implemented\n";
+#    # print "SNMP::MIB::NODE::DESTROY : $_[0]->{label} ($_[0])\n";
+#}
 package SNMP::MIB::SAVE_DESCR;
 
 sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }

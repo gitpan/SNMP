@@ -83,6 +83,7 @@ static int __snmp_xs_cb __P((int, struct snmp_session *, int,
                              struct snmp_pdu *, void *));
 static int __push_cb_args _((SV ** svp, SV * esv));
 static int __call_callback _((SV * sv, int flags));
+static char* __av_elem_pv _((AV * av, I32 key, char *dflt));
 
 #define NON_LEAF_NAME 0x04
 #define USE_LONG_NAMES 0x02
@@ -100,8 +101,7 @@ char *address;
 	return addr;
     hp = gethostbyname(address);
     if (hp == NULL){
-	fprintf(stderr, "unknown host: %s\n", address);
-	exit(1);
+        return (-1); /* error value */
     } else {
 	memcpy(&saddr.sin_addr, hp->h_addr, hp->h_length);
 	return saddr.sin_addr.s_addr;
@@ -129,6 +129,8 @@ struct tree* tp;
 static SnmpMibNode* __get_next_mib_node (tp)
 SnmpMibNode* tp;
 {
+   /* printf("tp = %lX, parent = %lX, peer = %lX, child = %lX\n", 
+              tp, tp->parent, tp->next_peer, tp->child_list); */
    if (tp->child_list) return(tp->child_list);
    if (tp->next_peer) return(tp->next_peer);
    if (!tp->parent) return(NULL);
@@ -423,7 +425,7 @@ int flag;
            icp = lcp;
         }
       }
-      if (isalpha(*lcp)) found_label = 1;
+      if (!found_label && isalpha(*lcp)) found_label = 1;
       lcp--;
    }
 
@@ -520,6 +522,8 @@ int  * type;
          }
          *oid_arr_len = newname + MAX_OID_LEN - op;
          bcopy(op, oid_arr, *oid_arr_len * sizeof(oid));
+      } else {
+         return(rtp);   /* HACK: otherwise, concat_oid_str confuses things */
       }
    }
  done:
@@ -642,7 +646,7 @@ __add_var_val_str(pdu, name, name_length, val, len, type)
         vars->type = ASN_UINTEGER;
 UINT:
         vars->val.integer = (long *)malloc(sizeof(long));
-        *(vars->val.integer) = strtoul(val,NULL,0);
+        sscanf(val,"%lu",vars->val.integer);
         vars->val_len = sizeof(long);
         break;
 
@@ -783,7 +787,7 @@ void *cb_data;
   char *label;
   char *iid;
   char *cp;
-  int getlabel_flag = FAIL_ON_NULL_IID;
+  int getlabel_flag = NO_FLAGS;
   int sprintval_flag = USE_BASIC;
 
   SV* cb = (SV*)cb_data;
@@ -927,6 +931,14 @@ int flags;
  }
  LEAVE;
  return count;
+}
+
+static char *
+__av_elem_pv(AV *av, I32 key, char *dflt)
+{
+   SV **elem = av_fetch(av, key, 0);
+
+   return (elem && SvOK(*elem)) ? SvPV(*elem, na) : dflt;
 }
 
 static int
@@ -1280,10 +1292,7 @@ snmp_set(sess_ref, varlist_ref, perl_callback)
 	{
            AV *varlist;
            SV **varbind_ref;
-           SV **varbind_tag_f;
-           SV **varbind_iid_f;
            SV **varbind_val_f;
-           SV **varbind_type_f;
            AV *varbind;
 	   I32 varlist_len;
 	   I32 varlist_ind;
@@ -1328,31 +1337,30 @@ snmp_set(sess_ref, varlist_ref, perl_callback)
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
 
-	            varbind_tag_f = av_fetch(varbind, VARBIND_TAG_F, 0);
-	            varbind_iid_f = av_fetch(varbind, VARBIND_IID_F, 0);
-	            varbind_val_f = av_fetch(varbind, VARBIND_VAL_F, 0);
-
-                    tp=__tag2oid((varbind_tag_f?SvPV(*varbind_tag_f,na):NULL),
-                                 (varbind_iid_f?SvPV(*varbind_iid_f,na):NULL),
+                    tp=__tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F,NULL),
+                                 __av_elem_pv(varbind, VARBIND_IID_F,NULL),
                                  oid_arr, &oid_arr_len, &type);
+
                     if (oid_arr_len == 0) {
                        if (verbose)
                         warn("error: set: unable to determine oid for object");
                        continue;
                     }
                     if (type == TYPE_UNKNOWN) {
-                      varbind_type_f = av_fetch(varbind,VARBIND_TYPE_F,0);
                       type = __translate_appl_type(
-                              (varbind_type_f?SvPV(*varbind_type_f,na):NULL));
+                                __av_elem_pv(varbind, VARBIND_TYPE_F, NULL));
                       if (type == TYPE_UNKNOWN) {
                          if (verbose)
                             warn("error: set: no type found for object");
                          continue;
                       }
                     }
+
+	            varbind_val_f = av_fetch(varbind, VARBIND_VAL_F, 0);
+
                     if (type==TYPE_INTEGER && use_enums && tp && tp->enums) {
                       for(ep = tp->enums; ep; ep = ep->next) {
-                        if (varbind_val_f && 
+                        if (varbind_val_f && SvOK(*varbind_val_f) &&
                             !strcmp(ep->label, SvPV(*varbind_val_f,na))) {
                           sv_setiv(*varbind_val_f, ep->value);
                           break;
@@ -1361,8 +1369,10 @@ snmp_set(sess_ref, varlist_ref, perl_callback)
                     }
                     
                     __add_var_val_str(pdu, oid_arr, oid_arr_len,
-                                  (varbind_val_f?SvPV(*varbind_val_f,na):NULL),
-                                  (varbind_val_f?SvCUR(*varbind_val_f):0),
+                                  (varbind_val_f && SvOK(*varbind_val_f) ?
+                                   SvPV(*varbind_val_f,na):NULL),
+                                  (varbind_val_f && SvOK(*varbind_val_f) ?
+                                   SvCUR(*varbind_val_f):0),
                                   type);
                  } /* if var_ref is ok */
               } /* for all the vars */
@@ -1406,8 +1416,6 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
 	{
            AV *varlist;
            SV **varbind_ref;
-           SV **varbind_tag_f;
-           SV **varbind_iid_f;
            AV *varbind;
 	   I32 varlist_len;
 	   I32 varlist_ind;
@@ -1458,12 +1466,10 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
 
-	            varbind_tag_f = av_fetch(varbind, VARBIND_TAG_F, 0);
-	            varbind_iid_f = av_fetch(varbind, VARBIND_IID_F, 0);
-
-                    tp=__tag2oid((varbind_tag_f?SvPV(*varbind_tag_f,na):"0"),
-                                 (varbind_iid_f?SvPV(*varbind_iid_f,na):NULL),
+                    tp=__tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F,NULL),
+                                 __av_elem_pv(varbind, VARBIND_IID_F,NULL),
                                  oid_arr, &oid_arr_len, NULL);
+
                     if (oid_arr_len) {
                        snmp_add_null_var(pdu, oid_arr, oid_arr_len);
                     } else {
@@ -1485,8 +1491,7 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
 		 goto done;
               }
 
-	      status = __send_sync_pdu(ss, pdu, &response,
-				       retry_nosuch,
+	      status = __send_sync_pdu(ss, pdu, &response, retry_nosuch,
                                        *err_str_svp,*err_num_svp,*err_ind_svp);
 
               last_vars = (response ? response->variables : NULL);
@@ -1496,12 +1501,8 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
 
-		    varbind_tag_f = av_fetch(varbind, VARBIND_TAG_F, 0);
-		    varbind_iid_f = av_fetch(varbind, VARBIND_IID_F, 0);
-
-                    vars = NULL;
-	            tp=__tag2oid((varbind_tag_f?SvPV(*varbind_tag_f,na):NULL),
-                                 (varbind_iid_f?SvPV(*varbind_iid_f,na):NULL),
+	            tp=__tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F,NULL),
+                                 __av_elem_pv(varbind, VARBIND_IID_F,NULL),
                                  oid_arr, &oid_arr_len, &type);
 
 		    for (vars = last_vars; vars; vars=vars->next_variable) {
@@ -1545,8 +1546,6 @@ snmp_getnext(sess_ref, varlist_ref, perl_callback)
 	{
            AV *varlist;
            SV **varbind_ref;
-           SV **varbind_tag_f;
-           SV **varbind_iid_f;
            AV *varbind;
 	   I32 varlist_len;
 	   I32 varlist_ind;
@@ -1571,7 +1570,7 @@ snmp_getnext(sess_ref, varlist_ref, perl_callback)
            char *label;
            char *iid;
            char *cp;
-           int getlabel_flag = FAIL_ON_NULL_IID;
+           int getlabel_flag = NO_FLAGS;
            int sprintval_flag = USE_BASIC;
            int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
 
@@ -1602,10 +1601,8 @@ snmp_getnext(sess_ref, varlist_ref, perl_callback)
                  varbind_ref = av_fetch(varlist, varlist_ind, 0);
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
-	            varbind_tag_f = av_fetch(varbind, VARBIND_TAG_F, 0);
-	            varbind_iid_f = av_fetch(varbind, VARBIND_IID_F, 0);
-                    __tag2oid((varbind_tag_f ? SvPV(*varbind_tag_f,na):"0"),
-                              (varbind_iid_f ? SvPV(*varbind_iid_f,na):NULL),
+                    __tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F, "0"),
+                              __av_elem_pv(varbind, VARBIND_IID_F, NULL),
                               oid_arr, &oid_arr_len, NULL);
                     snmp_add_null_var(pdu, oid_arr, oid_arr_len);
                  } /* if var_ref is ok */
@@ -1651,7 +1648,7 @@ snmp_getnext(sess_ref, varlist_ref, perl_callback)
                     __get_type_str(type, tmp_type_str);
                     tmp_sv = newSVpv(tmp_type_str, strlen(tmp_type_str));
                     av_store(varbind, VARBIND_TYPE_F, tmp_sv);
-                    len = __sprint_value(str_buf,vars,tp,type,sprintval_flag);
+                    len=__sprint_value(str_buf,vars,tp,type,sprintval_flag);
                     tmp_sv = newSVpv((char*)str_buf, len);
                     av_store(varbind, VARBIND_VAL_F, tmp_sv);
                     XPUSHs(sv_mortalcopy(tmp_sv));
@@ -1686,10 +1683,7 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
 	{
            AV *varlist;
            SV **varbind_ref;
-           SV **varbind_tag_f;
-           SV **varbind_iid_f;
            SV **varbind_val_f;
-           SV **varbind_type_f;
            AV *varbind;
 	   I32 varlist_len;
 	   I32 varlist_ind;
@@ -1735,31 +1729,31 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
 
-	            varbind_tag_f = av_fetch(varbind, VARBIND_TAG_F, 0);
-	            varbind_iid_f = av_fetch(varbind, VARBIND_IID_F, 0);
-	            varbind_val_f = av_fetch(varbind, VARBIND_VAL_F, 0);
-
-                    tp=__tag2oid((varbind_tag_f?SvPV(*varbind_tag_f,na):NULL),
-                                 (varbind_iid_f?SvPV(*varbind_iid_f,na):NULL),
+                    tp=__tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F, NULL),
+                                 __av_elem_pv(varbind, VARBIND_IID_F, NULL),
                                  oid_arr, &oid_arr_len, &type);
+
                     if (oid_arr_len == 0) {
                        if (verbose)
-                        warn("error: set: unable to determine oid for object");
+                        warn("error: SNMP::TrapSession::trap: unable to determine oid for object");
                        continue;
                     }
+
                     if (type == TYPE_UNKNOWN) {
-                      varbind_type_f = av_fetch(varbind,VARBIND_TYPE_F,0);
                       type = __translate_appl_type(
-                              (varbind_type_f?SvPV(*varbind_type_f,na):NULL));
+                              __av_elem_pv(varbind, VARBIND_TYPE_F, NULL));
                       if (type == TYPE_UNKNOWN) {
                          if (verbose)
-                            warn("error: SNMP::Session::set: no type found for object");
+                            warn("error: SNMP::TrapSession::trap: no type found for object");
                          continue;
                       }
                     }
+
+	            varbind_val_f = av_fetch(varbind, VARBIND_VAL_F, 0);
+
                     if (type==TYPE_INTEGER && use_enums && tp && tp->enums) {
                       for(ep = tp->enums; ep; ep = ep->next) {
-                        if (varbind_type_f && 
+                        if (varbind_val_f && SvOK(*varbind_val_f) &&
                             !strcmp(ep->label, SvPV(*varbind_val_f,na))) {
                           sv_setiv(*varbind_val_f, ep->value);
                           break;
@@ -1768,8 +1762,10 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
                     }
                     
                     __add_var_val_str(pdu, oid_arr, oid_arr_len,
-                                  (varbind_val_f?SvPV(*varbind_val_f,na):NULL),
-                                  (varbind_val_f?SvCUR(*varbind_val_f):0),
+                                  (varbind_val_f && SvOK(*varbind_val_f) ?
+                                   SvPV(*varbind_val_f,na):NULL),
+                                  (varbind_val_f && SvOK(*varbind_val_f) ?
+                                   SvCUR(*varbind_val_f):0),
                                   type);
                  } /* if var_ref is ok */
               } /* for all the vars */
@@ -1782,6 +1778,10 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
 	      }
               if (agent && strlen(agent)) {
                  pdu->agent_addr.sin_addr.s_addr = __parse_address(agent);
+                 if (pdu->agent_addr.sin_addr.s_addr == -1 && verbose) {
+                    warn("invalid agent address: %s", agent);
+                    goto err;
+                 }
               } else {
                  pdu->agent_addr.sin_addr.s_addr = get_myaddr();
               }
@@ -1792,7 +1792,7 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
               if (snmp_send(ss, pdu) == 0) {
                  snmp_perror("snmptrap");
               }	
-              snmp_free_pdu(pdu);
+              snmp_free_pdu(pdu); /* no response so we can always free pdu */
 	      XPUSHs(sv_2mortal(newSViv(snmp_get_errno())));
            } else {
 err:
@@ -1814,10 +1814,7 @@ snmp_trapV2(sess_ref,dstParty,srcParty,trap_oid,uptime,varlist_ref)
 	{
            AV *varlist;
            SV **varbind_ref;
-           SV **varbind_tag_f;
-           SV **varbind_iid_f;
            SV **varbind_val_f;
-           SV **varbind_type_f;
            AV *varbind;
 	   I32 varlist_len;
 	   I32 varlist_ind;
@@ -1862,31 +1859,31 @@ snmp_trapV2(sess_ref,dstParty,srcParty,trap_oid,uptime,varlist_ref)
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
 
-	            varbind_tag_f = av_fetch(varbind, VARBIND_TAG_F, 0);
-	            varbind_iid_f = av_fetch(varbind, VARBIND_IID_F, 0);
-	            varbind_val_f = av_fetch(varbind, VARBIND_VAL_F, 0);
-
-                    tp=__tag2oid((varbind_tag_f?SvPV(*varbind_tag_f,na):NULL),
-                                 (varbind_iid_f?SvPV(*varbind_iid_f,na):NULL),
+                    tp=__tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F,NULL),
+                                 __av_elem_pv(varbind, VARBIND_IID_F,NULL),
                                  oid_arr, &oid_arr_len, &type);
+
                     if (oid_arr_len == 0) {
                        if (verbose)
                         warn("error: set: unable to determine oid for object");
                        continue;
                     }
+
                     if (type == TYPE_UNKNOWN) {
-                      varbind_type_f = av_fetch(varbind,VARBIND_TYPE_F,1);
                       type = __translate_appl_type(
-                              (varbind_type_f?SvPV(*varbind_type_f,na):NULL));
+                                 __av_elem_pv(varbind, VARBIND_TYPE_F, NULL));
                       if (type == TYPE_UNKNOWN) {
                          if (verbose)
                             warn("error: set: no type found for object");
                          continue;
                       }
                     }
+
+	            varbind_val_f = av_fetch(varbind, VARBIND_VAL_F, 0);
+
                     if (type==TYPE_INTEGER && use_enums && tp && tp->enums) {
                       for(ep = tp->enums; ep; ep = ep->next) {
-                        if (varbind_type_f && 
+                        if (varbind_val_f && SvOK(*varbind_val_f) &&
                             !strcmp(ep->label, SvPV(*varbind_val_f,na))) {
                           sv_setiv(*varbind_val_f, ep->value);
                           break;
@@ -1895,8 +1892,10 @@ snmp_trapV2(sess_ref,dstParty,srcParty,trap_oid,uptime,varlist_ref)
                     }
                     
                     __add_var_val_str(pdu, oid_arr, oid_arr_len,
-                                  (varbind_val_f?SvPV(*varbind_val_f,na):NULL),
-                                  (varbind_val_f?SvCUR(*varbind_val_f):0),
+                                  (varbind_val_f && SvOK(*varbind_val_f) ?
+                                   SvPV(*varbind_val_f,na):NULL),
+                                  (varbind_val_f && SvOK(*varbind_val_f) ?
+                                   SvCUR(*varbind_val_f):0),
                                   type);
                  } /* if var_ref is ok */
               } /* for all the vars */
@@ -1927,7 +1926,7 @@ snmp_get_type(tag)
 	   static char type_str[MAX_TYPE_NAME_LEN];
            char *ret = NULL;
 
-           if (tag && *tag) tp = find_node(tag, Mib);
+           if (tag && *tag) tp = __tag2oid(tag, NULL, NULL, NULL, NULL);
            if (tp) __get_type_str(tp->type, ret = type_str);
 	   RETVAL = ret;
 	}
@@ -1945,17 +1944,40 @@ snmp_dump_packet(flag)
 
 
 char *
-snmp_map_enum(tag)
+snmp_map_enum(tag, val, iflag)
 	char *		tag
+	char *		val
+	int		iflag
 	CODE:
 	{
 	   struct tree *tp  = NULL;
-	   static char type_str[MAX_TYPE_NAME_LEN];
-           char *ret = NULL;
+           struct enum_list *ep;
+           char str_buf[STR_BUF_SIZE];
+           int ival;
 
-           if (tag && *tag) tp = find_node(tag, Mib);
-           if (tp) __get_type_str(tp->type, ret = type_str);
-	   RETVAL = ret;
+           RETVAL = NULL;
+
+           if (tag && *tag) tp = __tag2oid(tag, NULL, NULL, NULL, NULL);
+
+           if (tp) {
+              if (iflag) {
+                 ival = atoi(val);
+                 for(ep = tp->enums; ep; ep = ep->next) {
+                    if (ep->value == ival) {
+                       RETVAL = ep->label;
+                       break;
+                    }
+                 }
+              } else {
+                 for(ep = tp->enums; ep; ep = ep->next) {
+                    if (strEQ(ep->label, val)) {
+                       sprintf(str_buf,"%ld", ep->value);
+                       RETVAL = str_buf;
+                       break;
+                    }
+                 }
+              }
+           }
 	}
 	OUTPUT:
         RETVAL
@@ -1992,7 +2014,7 @@ snmp_translate_obj(var,mode,use_long,auto_init)
            str_buf[0] = '\0';
   	   switch (mode) {
               case SNMP_XLATE_MODE_TAG2OID:
-		if (!get_node(var, oid_arr, &oid_arr_len)) {
+		if (!__tag2oid(var, NULL, oid_arr, &oid_arr_len, NULL)) {
 		   if (verbose) warn("Unknown OID %s\n",var);
                 } else {
                    status = __sprint_num_objid(str_buf, oid_arr, oid_arr_len);
@@ -2018,7 +2040,7 @@ snmp_translate_obj(var,mode,use_long,auto_init)
              default:
 	       if (verbose) warn("unknown translation mode: %s\n", mode);
            }
-           RETVAL = str_buf;
+           RETVAL = (*str_buf ? str_buf : NULL);
 	}
         OUTPUT:
         RETVAL

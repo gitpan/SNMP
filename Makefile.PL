@@ -19,8 +19,8 @@ my %Params = (
     XSPROTOARG   => '-noprototypes', 	# XXX remove later?
     VERSION_FROM => 'SNMP.pm',
     realclean        => { FILES => 'host' },
-
 	    );
+
 my $snmp_lib, $snmp_llib, $sep;
 if ($Config{'osname'} eq 'MSWin32') {
     $snmp_lib = 'libsnmp.dll';

@@ -31,10 +31,10 @@ my $type1 = SNMP::getType($junk_name);
 printf "%s %d\n", (!defined($type1)) ? "ok" :"not ok", $n++;
 
 ######################################################################
-# For now, OIDs don't have a type.  Need to update getType()
+# getType() supports numeric OIDs now
 
 my $type2 = SNMP::getType($oid);
-printf "%s %d\n", (!defined($type2)) ? "ok" :"not ok", $n++;
+printf "%s %d\n", ($type2 =~ /OCTETSTR/) ? "ok" :"not ok", $n++;
 
 ######################################################################
 # This tests that sysDescr returns a valid type.
@@ -50,11 +50,11 @@ $oid_tag = SNMP::translateObj($name);
 printf "%s %d\n", ($oid eq $oid_tag) ? "ok" :"not ok", $n++;
 
 ######################################################################
-# bad name != OID
+# bad name returns 'undef'
 
 $oid_tag = '';
 $oid_tag = SNMP::translateObj($junk_name);
-printf "%s %d\n", ($oid ne $oid_tag) ? "ok" :"not ok", $n++;
+printf "%s %d\n", (!defined($oid_tag)) ? "ok" :"not ok", $n++;
 ######################################################################
 # OID -> name
 

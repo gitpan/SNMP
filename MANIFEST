@@ -7,12 +7,13 @@ SNMP.pm
 SNMP.xs
 TODO
 typemap
+hints/solaris.pl
 t/README
 t/session.t
 t/mib.t
 t/mib.txt
 t/translate.t
+examples/async.pl
 examples/mibwalk.pl
 examples/tablewalk.pl
 examples/testleak.pl
-examples/async.pl
