@@ -1,5 +1,6 @@
 use ExtUtils::MakeMaker;
 require 5;
+use Config;
 
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
 # the contents of the Makefile that is written.
@@ -7,6 +8,8 @@ require 5;
 %MakeParams = InitMakeParams();
 
 WriteMakefile(%MakeParams);
+
+GetTestHost();
 
 sub InitMakeParams {
 my %Params = (
@@ -17,19 +20,21 @@ my %Params = (
     VERSION_FROM => 'SNMP.pm',
 
 	    );
-my @IncludeFiles = qw[asn1.h parse.h snmp.h snmp_api.h 
+my $snmp_lib = ($Config{'osname'} eq 'MSWin32' ? 'libsnmp.dll' : 'libsnmp.a');
+my $snmp_llib = ($Config{'osname'} eq 'MSWin32' ? 'libsnmp' : 'snmp');
+my @IncludeFiles = qw[asn1.h mib.h parse.h snmp.h snmp_api.h 
 		      snmp_client.h snmp_impl.h];
 
 my @IncludeDirs = qw[/usr/include /usr/local/include];
 
 my $IncludeDir = find_files(\@IncludeFiles,\@IncludeDirs) ||
-    prompt("Where are the libsnmp include files?","/usr/local/include");
+    prompt("Where are the $snmp_lib include files?","/usr/local/include");
 
-my $LibDir = find_files(["libsnmp.a"],[qw[/usr/lib /usr/local/lib]]) ||
-	prompt("Where is libsnmp.a installed?","/usr/local/lib");
+my $LibDir = find_files(["$snmp_lib"],[qw[/usr/lib /usr/local/lib]]) ||
+	prompt("Where is $snmp_lib installed?","/usr/local/lib");
 
    @IncludeFiles = map {"$IncludeDir/$_";} @IncludeFiles;
-   $Params{LIBS} = "-L$LibDir -lsnmp";
+   $Params{LIBS} = "-L$LibDir -l$snmp_llib";
    $Params{INC}  = "-I$IncludeDir";
    $Params{H}    = \@IncludeFiles;
    return(%Params);
@@ -49,4 +54,11 @@ sub find_files {
     }
 }
 
+sub GetTestHost {
+    my $resp = prompt("Enter hostname or IP address for SNMP tests: ",
+		      "localhost public");
+    open(H, ">host") || die "Error: could not open file 'host' ($!)";
+    print H "$resp\n";
+    close H;
+}
 

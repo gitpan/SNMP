@@ -1,20 +1,3 @@
-better integration with ucd's mib loading. implement something like
-setMib,addMib,addMibDir,loadMibModule etc. I can't help thinking that
-there is a better/simpler user api for all these mib loading things that
-does not require setting a bunch of environment vars or calling a ton of
-routines. I need to understand ucd's mib loading api better to see if I
-can just provide a simpler subset through the perl api.
-
-allow argument to set/get/getNext to be a numeric OID in addition to a
-'tag.iid'. if the input arg is a numeric OID then getNext should
-continue to use a numeric OID as well as opposed to the attribute 'tag'
-as it does now..(I have patch that some gave as a start on this around
-sopmeplace)
-
-I think the error handling is fixed now - but it could use some
-validation/going over. See that informative strings are returned and the
-the error number is useful in all cases.
-
 implement an asynchronous interface so multiple requests can be sent out
 and responses can be handled with a call-back. probably should make an
 SNMP::snmp_callback which can be installed with Tk's fileevent or a
@@ -22,19 +5,23 @@ general select loop (and/or EventDrivenServer) This would really be
 easier and more reliable/compatible if/when event handling is moved to
 the perl core.
 
-implement more v2-isms. (assuming some stability and consensus on what
-that is) (waiting eagerly for dperkins work on polishing v2 in ucd's
-lib)
+allow unloading and reinitialization of parsed MIB 
 
-get SNMP module built and running on win32 (dperkins also working on a
-port of the ucd lib to Win32)
+allow MIB use on a per Session basis (ie. dependent on agent type and
+version, loaded mib might be different (yes I know properly designed
+mibs should eliminate the need for this but not all mibs are well
+behaved))
 
-making SNMP work with -w.
+I think the error handling is fixed now - but it could use some
+validation/going over. See that informative strings are returned and the
+the error number is useful in all cases.
 
-comments: a recent suggested fix (thanks mwiget) simplifies SNMP.xs code
-by calling sprint_value from the lib rather than the redundant way I was
-doing which essentially duplicated sprint_by_type. However, now octet
-string (and display string) values come out with quotes '"' around
-them. I find this very unnatual as it is a formatting issue which should
-not be assumed by the api. I would much prefer the raw unadorned string
-or hex vals but I guess this means going back to testing for type myself
+implement more v2-isms. and v3 isms?
+
+add trap generation/handling
+
+ensure module does not complain with -w.
+
+add POD docs to SNMP.pm (I have some patches around someplace for this)
+
+

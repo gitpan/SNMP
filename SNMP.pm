@@ -56,10 +56,19 @@ sub AUTOLOAD {
 bootstrap SNMP;
 
 # Preloaded methods go here.
-$auto_init_mib = 1; # DEPRECATED
-$verbose = 0; # set to false, limit extraneous I/O
-$use_long_names = 0; # set to 1 to prefer longer mib textual identifiers rather
-                     # than just leaf indentifiers in translateObj
+$auto_init_mib = 1; # enable automatic MIB loading at session creation time
+$verbose = 0; # non-zero for debugging and status output
+$use_long_names = 0; # non-zero to prefer longer mib textual identifiers rather
+                     # than just leaf indentifiers (see translateObj)
+                     # may also be set on a per session basis
+$use_sprint_value = 0; # non-zero to enable formatting of response values
+                   # using the snmp libraries "sprint_value"
+                   # may also be set on a per session basis
+                   # note: returned values not suitable for 'set' operations
+$use_enums = 0; # non-zero to return integers as enums and allow sets
+                # using enums where appropriate - integer data will
+                # still be accepted for set operations
+                # may also be set on a per session basis
 
 sub setMib {
 # loads mib from file name provided
@@ -73,7 +82,7 @@ sub setMib {
 }
 
 sub initMib {
-# eqivalent to calling init_mib if the mib database is empty (ie Mib is NULL)
+# eqivalent to calling the snmp library init_mib if Mib is NULL
 # if Mib is already loaded this function does nothing
   SNMP::_read_mib("");
 }
@@ -93,7 +102,7 @@ sub addMibFiles {
   }
 }
 
-sub addModules {
+sub loadModules {
 # adds mib module definitions to currently loaded mib database.
 # Modules will be searched from previously defined mib search dirs
 # Passing and arg of 'ALL' will cause all known modules to be loaded
@@ -102,7 +111,7 @@ sub addModules {
    }
 }
 
-sub removeModules {
+sub unloadModules {
 # causes modules to be unloaded from mib database
 # Passing and arg of 'ALL' will cause all known modules to be unloaded
   warn("SNMP::unloadModules not implemented! (yet)");
@@ -114,15 +123,16 @@ sub translateObj {
 # when $SNMP::use_long_names or second arg is non-zero the translation will
 # return longer textual identifiers (e.g., system.sysDescr)
    my $obj = shift;
-   my $use_long_names = shift || $SNMP::use_long_names;
-
+   my $long_names = shift || $SNMP::use_long_names;
+   my $res;
    if ($obj =~ /^\.?(\d+\.)*\d+$/) {
-      SNMP::_translate_obj($obj,1,$use_long_names);
+      $res = SNMP::_translate_obj($obj,1,$long_names);
    } elsif ($obj =~ /(\w+)+(\.\d+)*$/) {
-      SNMP::_translate_obj($1,0,$use_long_names) . $2;
-   } else {
-      undef;
+      $res = SNMP::_translate_obj($1,0,$long_names);
+      $res .= $2 if defined $2;
    }
+
+   return($res);
 }
 
 sub getType {
@@ -175,11 +185,15 @@ sub new {
    if ($this->{DestHost} =~ /\d+\.\d+\.\d+\.\d+/) {
      $this->{DestAddr} = $this->{DestHost};
    } else {
-     ($name, $aliases, $host_type, $len, $thisaddr) =
-       gethostbyname($this->{DestHost});
-     $this->{DestAddr} = join('.', unpack("C4", $thisaddr));
+     if (($name, $aliases, $host_type, $len, $thisaddr) =
+	 gethostbyname($this->{DestHost})) {
+	 $this->{DestAddr} = join('.', unpack("C4", $thisaddr));
+     } else {
+	 warn("unable to resolve destination address($this->{DestHost}!")
+	     if $SNMP::verbose;
+	 return undef;
+     }
    }
-   warn("undefined destination address!") unless $this->{DestAddr};
 
    $this->{SessPtr} = SNMP::_new_session($this->{Version},
 					 $this->{Community},
@@ -189,7 +203,13 @@ sub new {
 					 $this->{Timeout},
 					);
 
-   SNMP::initMib(); # this call ensures that *some* mib is loaded
+   return undef unless $this->{SessPtr};
+
+   SNMP::initMib() if $SNMP::auto_init_mib; # ensures that *some* mib is loaded
+
+   $this->{UseLongNames} ||= $SNMP::use_long_names;
+   $this->{UseSprintValue} ||= $SNMP::use_sprint_value;
+   $this->{UseEnums} ||= $SNMP::use_enums;
 
    bless $this;
 }
@@ -304,7 +324,7 @@ $type_f = 3;
 sub new {
    my $type = shift;
    my $this = shift;
-
+   $this ||= [];
    bless $this;
 }
 
@@ -339,7 +359,7 @@ sub new {
 }
 
 package SNMP;
-
+END{SNMP::_sock_cleanup();}
 # Autoload methods go after __END__, and are processed by the autosplit prog.
 
 1;
