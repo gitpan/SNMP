@@ -643,6 +643,7 @@ BOOT:
 # first blank line terminates bootstrap code
 Mib = 0;
 snmp_set_quick_print(1);
+init_mib_internals();
 
 double
 constant(name,arg)
@@ -693,6 +694,29 @@ snmp_new_session(version, community, peer, port, retries, timeout)
 
 
 int
+snmp_add_mib_dir(mib_dir,force=0)
+	char *		mib_dir
+	int		force
+	CODE:
+        {
+	SV *verbose;
+	int result;
+        verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
+        if (mib_dir && *mib_dir) {
+	   result = add_mibdir(mib_dir);
+        }
+        if (result) {
+           if (SvIV(verbose)) fprintf(stderr, "Added mib dir %s\n", mib_dir);
+        } else {
+           if (SvIV(verbose)) fprintf(stderr, "Failed to add %s\n", mib_dir);
+        }
+        RETVAL = (I32)result;
+        }
+        OUTPUT:
+        RETVAL
+
+
+int
 snmp_read_mib(mib_file,force=0)
 	char *		mib_file
 	int		force
@@ -702,7 +726,8 @@ snmp_read_mib(mib_file,force=0)
 
         verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
 
-        if (SvIV(verbose)) fprintf (stderr, "initializing MIB...");
+        if (SvIV(verbose)) fprintf(stderr, "reading MIB %s...",
+	                           (mib_file ? mib_file : "<null>"));
         fflush(stderr);
 
         if (Mib && force) __free_tree(Mib);
@@ -722,48 +747,17 @@ snmp_read_mib(mib_file,force=0)
         OUTPUT:
         RETVAL
 
-int
-snmp_add_mib_dir(mib_dir,force=0)
-	char *		mib_dir
-	int		force
-	CODE:
-        {
-	SV *verbose;
-	int result;
-        verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
-        if (mib_dir && *mib_dir) {
-	   result = add_mibdir(mib_dir);
-        }
-        if (result) {
-           if (SvIV(verbose)) fprintf(stderr, "added %s\n", mib_dir);
-        } else {
-           if (SvIV(verbose)) fprintf(stderr, "Failed to add %s\n", mib_dir);
-        }
-        RETVAL = (I32)result;
-        }
-        OUTPUT:
-        RETVAL
-
-void
-snmp_init_mib_internals()
-	CODE:
-        {
-	init_mib_internals();
-	}
 
 int
-snmp_read_module(module,force=0)
+snmp_read_module(module)
 	char *		module
-	int		force
 	CODE:
         {
 	SV *verbose;
 
         verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
 
-        if (Mib && force) __free_tree(Mib);
-
-        if ((module == NULL) || (*module == '\0')) {
+        if (!strcmp(module,"ALL")) {
            Mib = read_all_mibs();
         } else {
 	   Mib = read_module(module);
@@ -771,7 +765,7 @@ snmp_read_module(module,force=0)
         if (Mib) {
            if (SvIV(verbose)) fprintf(stderr, "Read %s\n", module);
         } else {
-           if (SvIV(verbose)) fprintf(stderr, "Failed to read %s\n", module);
+           if (SvIV(verbose)) fprintf(stderr, "Failed reading %s\n", module);
         }
         RETVAL = (I32)Mib;
         }

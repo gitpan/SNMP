@@ -57,9 +57,6 @@ bootstrap SNMP;
 
 # Preloaded methods go here.
 $auto_init_mib = 1; # DEPRECATED
-$mib_loaded = 0; # flag to indicate if mib has been loaded. mib loading
-                 # routines set this flag as a side effect. flag is checked
-                 # upon session creation and if false triggers auto loading
 $verbose = 0; # set to false, limit extraneous I/O
 $use_long_names = 0; # set to 1 to prefer longer mib textual identifiers rather
                      # than just leaf indentifiers in translateObj
@@ -68,81 +65,47 @@ sub setMib {
 # loads mib from file name provided
 # setting second arg to true causes currently loaded mib to be replaced
 # otherwise mib file will be added to existing loaded mib database
-# NOTE: now deprecated in favor of setMibFiles and new module based funcs
+# NOTE: now deprecated in favor of addMibFiles and new module based funcs
    my $file = shift;
    my $force = shift || '0';
    return 0 if $file and not (-r $file);
    SNMP::_read_mib($file,$force);
-   $SNMP::mib_loaded = 1;
 }
 
-sub setMibFiles {
-# replaces currently loaded mib database with mib defined in
-# file(s) supplied - if no files supplied, will call init_mib and
-# rely entirely on ucd environment variable settings (see man mib_api)
-   my $file = shift || '';
+sub initMib {
+# eqivalent to calling init_mib if the mib database is empty (ie Mib is NULL)
+# if Mib is already loaded this function does nothing
+  SNMP::_read_mib("");
+}
 
-   SNMP::_read_mib($file, 1) unless $file and not (-r $file);
-   foreach $file (@_) {
-     next if $file and not (-r $file);
-     SNMP::_read_mib($file);
-   }
-   $SNMP::mib_loaded = 1;
+sub addMibDirs {
+# adds directories to search path when a module is requested to be loaded
+  foreach (@_) {
+    SNMP::_add_mib_dir($_);
+  }
 }
 
 sub addMibFiles {
 # adds mib definitions to currently loaded mib database from
-# file(s) supplied - if no files supplied, will call init_mib and
-# rely entirely on ucd environment variable settings (see man mib_api)
-   my $file = shift || '';
-   SNMP::_read_mib($file) unless $file and not (-r $file);
-   foreach $file (@_) {
-     next if $file and not (-r $file);
-     SNMP::_read_mib($file);
-   }
-   $SNMP::mib_loaded = 1;
-}
-
-sub setMibDirs {
-# ideally this would reinitialize currently defined mib search directories
-# but no api for that that I can find so this function just adds to mib
-# search dirs identical to addMibDirs
-  my $dir;
-  foreach $dir (@_) {
-    SNMP::_add_mib_dir($dir);
+# file(s) supplied
+  foreach (@_) {
+    SNMP::_read_mib($_);
   }
-  SNMP::_init_mib_internals();
-}
-
-sub addMibDirs {
-  my $dir;
-  foreach $dir (@_) {
-    SNMP::_add_mib_dir($dir);
-  }
-  SNMP::_init_mib_internals();
-}
-
-sub setModules {
-# replaces currently loaded mib database with mib definitions from supplied
-# modules. Modules will be searched from previously defined mib search dirs
-   my $mod = shift || '';
-   SNMP::_read_module($mod);
-   foreach $mod (@_) {
-     SNMP::_read_module($mod);
-   }
-   $SNMP::mib_loaded = 1;
 }
 
 sub addModules {
-# adds mib definitions from supplied modules to currently loaded mib database.
+# adds mib module definitions to currently loaded mib database.
 # Modules will be searched from previously defined mib search dirs
-   my $mod = shift;
-   $mod =~ s/^ALL$//;
-   SNMP::_read_module($mod);
-   foreach $mod (@_) {
-     SNMP::_read_module($mod);
+# Passing and arg of 'ALL' will cause all known modules to be loaded
+   foreach (@_) {
+     SNMP::_read_module($_);
    }
-   $SNMP::mib_loaded = 1;
+}
+
+sub removeModules {
+# causes modules to be unloaded from mib database
+# Passing and arg of 'ALL' will cause all known modules to be unloaded
+  warn("SNMP::unloadModules not implemented! (yet)");
 }
 
 sub translateObj {
@@ -225,9 +188,8 @@ sub new {
 					 $this->{Retries},
 					 $this->{Timeout},
 					);
-   # if mib is not already loaded try to load with no parameters
-   # will attempt to load according to environment variables
-   SNMP::setMibFiles() unless $SNMP::mib_loaded;
+
+   SNMP::initMib(); # this call ensures that *some* mib is loaded
 
    bless $this;
 }
