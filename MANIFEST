@@ -6,6 +6,7 @@ README
 SNMP.pm
 SNMP.xs
 TODO
+perlsnmp.h
 typemap
 hints/solaris.pl
 hints/irix.pl
@@ -16,6 +17,7 @@ t/mib.txt
 t/translate.t
 examples/async1.pl
 examples/async2.pl
+examples/ipforward.pl
 examples/mibtree.pl
 examples/mibwalk.pl
 examples/pingmib.pl

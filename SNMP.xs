@@ -45,6 +45,8 @@ DLL_IMPORT extern struct tree *Mib;
 #include "parse.h"
 #include "mib.h"
 
+#include "perlsnmp.h"
+
 #define SUCCESS 1
 #define FAILURE 0
 
