@@ -9,13 +9,15 @@ BEGIN {
     }
 }
 
+use Test;
+BEGIN {plan tests => 3}
 use SNMP;
 
 $SNMP::verbose = 0;
-$n = 3;  # Number of tests to run
+#$n = 3;  # Number of tests to run
 
-print "1..$n\n";
-if ($n == 0) { exit 0; } else { $n = 1; }
+#print "1..$n\n";
+#if ($n == 0) { exit 0; } else { $n = 1; }
 
 my $junk_oid = ".1.3.6.1.2.1.1.1.1.1.1";
 my $oid = '.1.3.6.1.2.1.1.1';
@@ -29,18 +31,22 @@ my $junk_mib_file = 'mib.txt';
 # found or isn't readable. 
 
 $res = SNMP::setMib($junk_mib_file,1);
-printf "%s %d\n", (!$res) ? "ok" :"not ok", $n++;
-
+#printf "%s %d\n", (!$res) ? "ok" :"not ok", $n++;
+ok(defined(!$res));
 ######################################################################
 # Now we give the right name
 
 $res = SNMP::setMib($mib_file,1);
-printf "%s %d\n", ($res) ? "ok" :"not ok", $n++;
-
+#printf "%s %d\n", ($res) ? "ok" :"not ok", $n++;
+ok(defined($res));
 ######################################################################
 # See if we can find a mib to use
 
 $res = SNMP::setMib($mib_file,0);
-printf "%s %d\n", ($res) ? "ok" :"not ok", $n++;
+#printf "%s %d\n", ($res) ? "ok" :"not ok", $n++;
+ok(defined($res));
+
+
+
 
 

@@ -41,7 +41,7 @@
 #ifndef G_VOID
 #define G_VOID G_DISCARD
 #endif
-
+/*
 #ifndef in_addr_t
 #define in_addr_t u_long
 #endif
@@ -49,6 +49,7 @@
 #ifdef HAS_MEMCPY
 #define bcopy(s,d,l) memcpy((d),(s),(l))
 #endif
+*/
 
 #ifdef WIN32
 #define SOCK_STARTUP winsock_startup()
@@ -61,20 +62,42 @@
 #define SOCK_CLEANUP
 #define DLL_IMPORT
 #endif
+
+/* this should be removed as ucd-snmp no longer needs these types
+   previosly required by KMT - REMOVE ASAP */
+#ifndef u_int8_t
+#define u_int8_t u_char
+#endif
+#ifndef u_int16_t
+#define u_int16_t u_short
+#endif
+#ifndef u_int32_t
+#define u_int32_t u_long
+#endif
+/* end KMT type - REMOVE ASAP */
+
 extern int Suffix;
 DLL_IMPORT extern struct tree *Mib;
-#include "asn1.h"
-#include "snmp_api.h"
-#include "snmp_client.h"
-#include "snmp_impl.h"
-#include "snmp.h"
-#include "parse.h"
-#include "mib.h"
+#include "ucd-snmp/ucd-snmp-config.h"
+#include "ucd-snmp/asn1.h"
+#include "ucd-snmp/snmp_api.h"
+#include "ucd-snmp/snmp_client.h"
+#include "ucd-snmp/snmp_impl.h"
+#include "ucd-snmp/snmp.h"
+#include "ucd-snmp/parse.h"
+#include "ucd-snmp/mib.h"
+#include "ucd-snmp/scapi.h"
+#include "ucd-snmp/keytools.h"
+#include "ucd-snmp/snmpv3.h"
+#include "ucd-snmp/transform_oids.h"
+#include "ucd-snmp/default_store.h"
 
 #include "perlsnmp.h"
 
 #define SUCCESS 1
 #define FAILURE 0
+
+#define ZERO_BUT_TRUE "0 but true"
 
 #define VARBIND_TAG_F 0
 #define VARBIND_IID_F 1
@@ -84,6 +107,15 @@ DLL_IMPORT extern struct tree *Mib;
 #define TYPE_UNKNOWN 0
 #define MAX_TYPE_NAME_LEN 16
 #define STR_BUF_SIZE 1024
+#define ENG_ID_BUF_SIZE 32
+
+/* these should be part of transform_oids.h ? */
+#define USM_AUTH_PROTO_MD5_LEN 10
+#define USM_AUTH_PROTO_SHA_LEN 10
+#define USM_PRIV_PROTO_DES_LEN 10
+
+/* why does ucd-snmp redefine sockaddr_in ??? */
+#define SIN_ADDR(snmp_addr) (((struct sockaddr_in *) &(snmp_addr))->sin_addr)
 
 typedef struct snmp_session SnmpSession;
 typedef struct tree SnmpMibNode;
@@ -244,6 +276,12 @@ char* typestr;
 	    return(TYPE_COUNTER64);
 	if (!strncasecmp(typestr,"NULL",3))
 	    return(TYPE_NULL);
+	if (!strncasecmp(typestr,"ENDOFMIBVIEW",3))
+	    return(SNMP_ENDOFMIBVIEW);
+	if (!strncasecmp(typestr,"NOSUCHOBJECT",7))
+	    return(SNMP_NOSUCHOBJECT);
+	if (!strncasecmp(typestr,"NOSUCHINSTANCE",7))
+	    return(SNMP_NOSUCHINSTANCE);
 	if (!strncasecmp(typestr,"UINTEGER",3))
 	    return(TYPE_UINTEGER); /* historic - should not show up */
                                    /* but it does?                  */
@@ -281,6 +319,12 @@ int type;
 	    break;
 	case ASN_NULL:
             return(TYPE_NULL);
+	    break;
+	/* no translation for these exception type values */
+	case SNMP_ENDOFMIBVIEW:
+	case SNMP_NOSUCHOBJECT:
+	case SNMP_NOSUCHINSTANCE:
+	    return(type);
 	    break;
 	case ASN_UINTEGER:
             return(TYPE_UINTEGER);
@@ -359,7 +403,16 @@ int flag;
           len = strlen(buf);
           break;
 
+	case SNMP_ENDOFMIBVIEW:
+	case SNMP_NOSUCHOBJECT:
+	case SNMP_NOSUCHINSTANCE:
+	  break;
+
         case ASN_COUNTER64:
+          printI64(buf,(struct counter64 *)var->val.counter64);
+          len = strlen(buf);
+          break;
+
         case ASN_BIT_STR:
         case ASN_NSAP:
         default:
@@ -466,6 +519,15 @@ char * str;
 	        break;
 	case TYPE_NULL:
                 strcpy(str, "NULL");
+                break;
+	case SNMP_ENDOFMIBVIEW:
+                strcpy(str, "ENDOFMIBVIEW");
+                break;
+	case SNMP_NOSUCHOBJECT:
+                strcpy(str, "NOSUCHOBJECT");
+                break;
+	case SNMP_NOSUCHINSTANCE:
+                strcpy(str, "NOSUCHINSTANCE");
                 break;
 	case TYPE_UINTEGER:
                 strcpy(str, "UINTEGER"); /* historic - should not show up */
@@ -825,22 +887,24 @@ retry:
             /* in SNMPv2c, SNMPv2u, SNMPv2*, and SNMPv3 PDUs */
             case SNMP_ERR_INCONSISTENTNAME:
             default:
-               sv_catpv(err_str_sv, snmp_errstring((*response)->errstat));
+               sv_catpv(err_str_sv, 
+                        (char*)snmp_errstring((*response)->errstat));
                sv_setiv(err_num_sv, (*response)->errstat);
 	       sv_setiv(err_ind_sv, (*response)->errindex);
+               status = (*response)->errstat;
                break;
 	 }
          break;
 
       case STAT_TIMEOUT:
       case STAT_ERROR:
-         sv_catpv(err_str_sv, snmp_api_errstring(snmp_get_errno()));
-         sv_setiv(err_num_sv, snmp_get_errno());
+          sv_catpv(err_str_sv, (char*)snmp_api_errstring(ss->s_snmp_errno));
+          sv_setiv(err_num_sv, ss->s_snmp_errno);
          break;
 
       default:
          sv_catpv(err_str_sv, "send_sync_pdu: unknown status");
-         sv_setiv(err_num_sv, snmp_get_errno());
+         sv_setiv(err_num_sv, ss->s_snmp_errno);
          break;
    }
 
@@ -1178,6 +1242,8 @@ SOCK_STARTUP;
 Mib = 0;
 snmp_set_do_debugging(0); /* overrides lib dflt - silence init_mib_internals */
 snmp_set_quick_print(1);
+init_snmpv3("snmpapp");
+snmp_call_callbacks(0,0,NULL);
 #init_mib_internals();
 
 double
@@ -1233,6 +1299,117 @@ snmp_new_session(version, community, peer, port, retries, timeout)
            }
         end:
            RETVAL = ss;
+	}
+        OUTPUT:
+        RETVAL
+
+SnmpSession *
+snmp_new_v3_session(version, peer, port, retries, timeout, sec_name, sec_level, sec_eng_id, context_eng_id, context, auth_proto, auth_pass, priv_proto, priv_pass, eng_boots, eng_time)
+        int	version
+        char *	peer
+        int	port
+        int	retries
+        int	timeout
+        char *  sec_name
+        int     sec_level
+        char *  sec_eng_id
+        char *  context_eng_id
+        char *  context
+        char *  auth_proto
+        char *  auth_pass
+        char *  priv_proto
+        char *  priv_pass
+	int     eng_boots
+	int     eng_time
+	CODE:
+	{
+           u_char sec_eng_id_buf[ENG_ID_BUF_SIZE]; 
+           u_char context_eng_id_buf[ENG_ID_BUF_SIZE]; 
+	   SnmpSession session = {0};
+	   SnmpSession *ss = NULL;
+           int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
+
+	   if (version == 3) {
+		session.version = SNMP_VERSION_3;
+           } else {
+		if (verbose)
+                   warn("Unsupported SNMP version (%d)\n", version);
+                goto end;
+	   }
+
+	   session.peername = strdup(peer);
+	   session.remote_port = port;
+           session.retries = retries; /* 5 */
+           session.timeout = timeout; /* 1000000L */
+           session.authenticator = NULL;
+           session.contextNameLen = strlen(context);
+           session.contextName = context;
+           session.securityNameLen = strlen(sec_name);
+           session.securityName = sec_name;
+           session.securityLevel = sec_level;
+           /* session.securityEngineID = sec_eng_id_buf;*/
+           session.securityEngineID = malloc(ENG_ID_BUF_SIZE);
+           session.securityEngineIDLen = 
+              hex_to_binary(sec_eng_id, session.securityEngineID);
+           /* session.contextEngineID = context_eng_id_buf; */
+	   session.contextEngineID = malloc(ENG_ID_BUF_SIZE);
+           session.contextEngineIDLen = 
+              hex_to_binary(context_eng_id, session.contextEngineID);
+           session.engineBoots = eng_boots;
+           session.engineTime = eng_time;
+           if (!strcmp(auth_proto, "MD5")) {
+              session.securityAuthProto = usmHMACMD5AuthProtocol;
+              session.securityAuthProtoLen = USM_AUTH_PROTO_MD5_LEN;
+           } else if (!strcmp(auth_proto, "SHA")) {
+              session.securityAuthProto = usmHMACSHA1AuthProtocol;
+              session.securityAuthProtoLen = USM_AUTH_PROTO_SHA_LEN;
+           } else {
+              if (verbose)
+                 warn("Unsupported authentication protocol(%s)\n", auth_proto);
+              goto end;
+           }
+           if (session.securityLevel >= SNMP_SEC_LEVEL_AUTHNOPRIV) {
+              session.securityAuthKeyLen = USM_AUTH_KU_LEN;
+              if (generate_Ku(session.securityAuthProto,
+                              session.securityAuthProtoLen,
+                              (u_char *)auth_pass, strlen(auth_pass),
+                              session.securityAuthKey,
+                              &session.securityAuthKeyLen) != SNMPERR_SUCCESS) {
+                 if (verbose)
+                    warn("Error generating Ku from authentication password.\n");
+                 goto end;
+              }
+           }
+           if (!strcmp(priv_proto, "DES")) {
+              session.securityPrivProto = usmDESPrivProtocol;
+              session.securityPrivProtoLen = USM_PRIV_PROTO_DES_LEN;
+           } else {
+              if (verbose)
+                 warn("Unsupported privacy protocol(%s)\n", priv_proto);
+              goto end;
+           }
+           if (session.securityLevel >= SNMP_SEC_LEVEL_AUTHPRIV) {
+             session.securityPrivKeyLen = USM_PRIV_KU_LEN;
+              if (generate_Ku(session.securityAuthProto,
+                              session.securityAuthProtoLen,
+                              (u_char *)priv_pass, strlen(priv_pass),
+                              session.securityPrivKey,
+                              &session.securityPrivKeyLen) != SNMPERR_SUCCESS) {
+                 if (verbose)
+                    warn("Error generating Ku from privacy pass phrase.\n");
+                 goto end;
+               }
+            }
+           snmp_synch_setup(&session);
+
+           ss = snmp_open(&session);
+
+           if (ss == NULL) {
+	      if (verbose) warn("Couldn't open SNMP session");
+           }
+        end:
+           RETVAL = ss;
+	   free (session.contextEngineID);
 	}
         OUTPUT:
         RETVAL
@@ -1434,23 +1611,34 @@ snmp_set(sess_ref, varlist_ref, perl_callback)
                  varbind_ref = av_fetch(varlist, varlist_ind, 0);
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
-
                     tp=__tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F,NULL),
                                  __av_elem_pv(varbind, VARBIND_IID_F,NULL),
                                  oid_arr, &oid_arr_len, &type);
 
-                    if (oid_arr_len == 0) {
+                    if (oid_arr_len==0) {
                        if (verbose)
-                        warn("error: set: unable to determine oid for object");
-                       continue;
-                    }
+                          warn("error: set: unknown object ID");
+	               sv_catpv(*err_str_svp, 
+                               (char*)snmp_api_errstring(SNMPERR_UNKNOWN_OBJID));
+                       sv_setiv(*err_num_svp, SNMPERR_UNKNOWN_OBJID);
+                       XPUSHs(&sv_undef); /* unknown OID */
+		       snmp_free_pdu(pdu);
+		       goto done;
+		    }
+
+
                     if (type == TYPE_UNKNOWN) {
                       type = __translate_appl_type(
                                 __av_elem_pv(varbind, VARBIND_TYPE_F, NULL));
                       if (type == TYPE_UNKNOWN) {
                          if (verbose)
                             warn("error: set: no type found for object");
-                         continue;
+	                 sv_catpv(*err_str_svp, 
+                                  (char*)snmp_api_errstring(SNMPERR_VAR_TYPE));
+                         sv_setiv(*err_num_svp, SNMPERR_VAR_TYPE);
+                         XPUSHs(&sv_undef); /* unknown OID */
+		         snmp_free_pdu(pdu);
+		         goto done;
                       }
                     }
 
@@ -1481,8 +1669,15 @@ snmp_set(sess_ref, varlist_ref, perl_callback)
                  # __snmp_xs_cb as part of perl_callback so it is not freed
                  # and reconstructed for each call
                  status = snmp_async_send(ss,pdu,__snmp_xs_cb,perl_callback);
-                 if (status == 0) snmp_free_pdu(pdu);
-                 XPUSHs(sv_2mortal(newSViv(status)));
+                 if (status != 0) {
+                    XPUSHs(sv_2mortal(newSViv(status))); /* push the reqid?? */
+                 } else {
+                    snmp_free_pdu(pdu);
+                    sv_catpv(*err_str_svp, 
+                             (char*)snmp_api_errstring(ss->s_snmp_errno));
+                    sv_setiv(*err_num_svp, ss->s_snmp_errno);
+                    XPUSHs(&sv_undef);
+                 }
 		 goto done;
               }
 
@@ -1492,44 +1687,48 @@ snmp_set(sess_ref, varlist_ref, perl_callback)
                                        *err_ind_svp);
 
               if (response) snmp_free_pdu(response);
-
-	      XPUSHs(sv_2mortal(newSViv(snmp_get_errno())));
+		
+              if (status) {
+		 XPUSHs(&sv_undef);
+	      } else {
+                 XPUSHs(sv_2mortal(newSVpv(ZERO_BUT_TRUE,0)));
+              }
            } else {
 err:
               /* BUG!!! need to return an error value */
               XPUSHs(&sv_undef); /* no mem or bad args */
            }
 done:
-	Safefree(oid_arr);
+           Safefree(oid_arr);
         }
 
 
 void
 snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
-        SV *	sess_ref
-        int	retry_nosuch
-        SV *	varlist_ref
-        SV *	perl_callback
-	PPCODE:
-	{
+        SV *    sess_ref
+        int     retry_nosuch
+        SV *    varlist_ref
+        SV *    perl_callback
+        PPCODE:
+        {
            AV *varlist;
            SV **varbind_ref;
            AV *varbind;
-	   I32 varlist_len;
-	   I32 varlist_ind;
-	   I32 varbind_len;
+           I32 varlist_len;
+           I32 varlist_ind;
+           I32 varbind_len;
            struct snmp_session *ss;
            struct snmp_pdu *pdu, *response;
            struct variable_list *vars;
            struct variable_list *last_vars;
            struct tree *tp;
            int len;
-	   oid *oid_arr;
-	   int oid_arr_len = MAX_OID_LEN;
+           oid *oid_arr;
+           int oid_arr_len = MAX_OID_LEN;
            SV *tmp_sv;
            int type;
-	   char tmp_type_str[MAX_TYPE_NAME_LEN];
-	   char str_buf[STR_BUF_SIZE];
+           char tmp_type_str[MAX_TYPE_NAME_LEN];
+           char str_buf[STR_BUF_SIZE];
            SV **sess_ptr_sv;
            SV **err_str_svp;
            SV **err_num_svp;
@@ -1543,23 +1742,23 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
            if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
 
               sess_ptr_sv = hv_fetch((HV*)SvRV(sess_ref), "SessPtr", 7, 1);
-	      ss = (SnmpSession *)SvIV((SV*)SvRV(*sess_ptr_sv));
+              ss = (SnmpSession *)SvIV((SV*)SvRV(*sess_ptr_sv));
               err_str_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorStr", 8, 1);
               err_num_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorNum", 8, 1);
               err_ind_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorInd", 8, 1);
               sv_setpv(*err_str_svp, "");
               sv_setiv(*err_num_svp, 0);
               sv_setiv(*err_ind_svp, 0);
-	      if (SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseEnums", 8, 1)))
+              if (SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseEnums", 8, 1)))
                  sprintval_flag = USE_ENUMS;
-	      if (SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseSprintValue", 14, 1)))
+              if (SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseSprintValue", 14, 1)))
                  sprintval_flag = USE_SPRINT_VALUE;
 
               pdu = snmp_pdu_create(SNMP_MSG_GET);
 
               varlist = (AV*) SvRV(varlist_ref);
               varlist_len = av_len(varlist);
-	      for(varlist_ind = 0; varlist_ind <= varlist_len; varlist_ind++) {
+              for(varlist_ind = 0; varlist_ind <= varlist_len; varlist_ind++) {
                  varbind_ref = av_fetch(varlist, varlist_ind, 0);
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
@@ -1584,36 +1783,43 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
                  # __snmp_xs_cb as part of perl_callback so it is not freed
                  # and reconstructed for each call
                  status = snmp_async_send(ss,pdu,__snmp_xs_cb,perl_callback);
-                 if (status == 0) snmp_free_pdu(pdu);
-                 XPUSHs(sv_2mortal(newSViv(status)));
-		 goto done;
+                 if (status != 0) {
+                    XPUSHs(sv_2mortal(newSViv(status))); /* push the reqid?? */
+                 } else {
+                    snmp_free_pdu(pdu);
+                    sv_catpv(*err_str_svp, 
+                             (char*)snmp_api_errstring(ss->s_snmp_errno));
+                    sv_setiv(*err_num_svp, ss->s_snmp_errno);
+                    XPUSHs(&sv_undef);
+                 }
+                 goto done;
               }
 
-	      status = __send_sync_pdu(ss, pdu, &response, retry_nosuch,
+              status = __send_sync_pdu(ss, pdu, &response, retry_nosuch,
                                        *err_str_svp,*err_num_svp,*err_ind_svp);
 
               last_vars = (response ? response->variables : NULL);
 
-	      for(varlist_ind = 0; varlist_ind <= varlist_len; varlist_ind++) {
+              for(varlist_ind = 0; varlist_ind <= varlist_len; varlist_ind++) {
                  varbind_ref = av_fetch(varlist, varlist_ind, 0);
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
 
-	            tp=__tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F,NULL),
+                    tp=__tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F,NULL),
                                  __av_elem_pv(varbind, VARBIND_IID_F,NULL),
                                  oid_arr, &oid_arr_len, &type);
 
-		    for (vars = last_vars; vars; vars=vars->next_variable) {
-		       if (__oid_cmp(oid_arr, oid_arr_len, vars->name,
+                    for (vars = last_vars; vars; vars=vars->next_variable) {
+	            if (__oid_cmp(oid_arr, oid_arr_len, vars->name,
                                      vars->name_length) == 0) {
                           if (type == TYPE_UNKNOWN)
                              type = __translate_asn_type(vars->type);
                           last_vars = vars->next_variable;
-			  break;
+                          break;
                        }
                     }
-		    if (vars) {
-		       __get_type_str(type, tmp_type_str);
+                    if (vars) {
+                       __get_type_str(type, tmp_type_str);
                        tmp_sv = newSVpv(tmp_type_str,strlen(tmp_type_str));
                        av_store(varbind, VARBIND_TYPE_F, tmp_sv);
                        len=__sprint_value(str_buf,vars,tp,type,sprintval_flag);
@@ -1622,7 +1828,7 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
                        XPUSHs(sv_mortalcopy(tmp_sv));
                     } else {
                        av_store(varbind, VARBIND_VAL_F, &sv_undef);
-	      	       av_store(varbind, VARBIND_TYPE_F, &sv_undef);
+                       av_store(varbind, VARBIND_TYPE_F, &sv_undef);
                        XPUSHs(&sv_undef);
                     }
                  }
@@ -1630,24 +1836,24 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
               if (response) snmp_free_pdu(response);
            } else {
               XPUSHs(&sv_undef); /* no mem or bad args */
-	   }
+           }
      done:
-	Safefree(oid_arr);
-	}
+           Safefree(oid_arr);
+        }
 
 int
 snmp_getnext(sess_ref, varlist_ref, perl_callback)
-        SV *	sess_ref
-        SV *	varlist_ref
-        SV *	perl_callback
-	PPCODE:
-	{
+        SV *    sess_ref
+        SV *    varlist_ref
+        SV *    perl_callback
+        PPCODE:
+        {
            AV *varlist;
            SV **varbind_ref;
            AV *varbind;
-	   I32 varlist_len;
-	   I32 varlist_ind;
-	   I32 varbind_len;
+           I32 varlist_len;
+           I32 varlist_ind;
+           I32 varbind_len;
            struct snmp_session *ss;
            struct snmp_pdu *pdu, *response;
            struct variable_list *vars;
@@ -1699,10 +1905,24 @@ snmp_getnext(sess_ref, varlist_ref, perl_callback)
                  varbind_ref = av_fetch(varlist, varlist_ind, 0);
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
-                    __tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F, "0"),
+
+                    tp = __tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F, "0"),
                               __av_elem_pv(varbind, VARBIND_IID_F, NULL),
                               oid_arr, &oid_arr_len, NULL);
-                    snmp_add_null_var(pdu, oid_arr, oid_arr_len);
+
+      		    if (oid_arr_len) {
+  		       snmp_add_null_var(pdu, oid_arr, oid_arr_len);
+		    } else {
+                       if (verbose)
+                          warn("error: set: unknown object ID");
+	               sv_catpv(*err_str_svp, 
+                               (char*)snmp_api_errstring(SNMPERR_UNKNOWN_OBJID));
+                       sv_setiv(*err_num_svp, SNMPERR_UNKNOWN_OBJID);
+                       XPUSHs(&sv_undef); /* unknown OID */
+		       snmp_free_pdu(pdu);
+		       goto done;
+		    }
+	
                  } /* if var_ref is ok */
               } /* for all the vars */
 
@@ -1712,8 +1932,15 @@ snmp_getnext(sess_ref, varlist_ref, perl_callback)
                  # __snmp_xs_cb as part of perl_callback so it is not freed
                  # and reconstructed for each call
                  status = snmp_async_send(ss,pdu,__snmp_xs_cb,perl_callback);
-                 if (status == 0) snmp_free_pdu(pdu);
-                 XPUSHs(sv_2mortal(newSViv(status)));
+                 if (status != 0) {
+                    XPUSHs(sv_2mortal(newSViv(status))); /* push the reqid?? */
+                 } else {
+                    snmp_free_pdu(pdu);
+                    sv_catpv(*err_str_svp, 
+                             (char*)snmp_api_errstring(ss->s_snmp_errno));
+                    sv_setiv(*err_num_svp, ss->s_snmp_errno);
+                    XPUSHs(&sv_undef);
+                 }
 		 goto done;
               }
 
@@ -1758,6 +1985,172 @@ err:
                     XPUSHs(&sv_undef);
                  }
               }
+
+              if (response) snmp_free_pdu(response);
+
+           } else {
+              XPUSHs(&sv_undef); /* no mem or bad args */
+	   }
+done:
+	Safefree(oid_arr);
+	}
+
+int
+snmp_getbulk(sess_ref, nonrepeaters, maxrepetitions, varlist_ref, perl_callback)
+        SV *	sess_ref
+	int nonrepeaters
+	int maxrepetitions
+        SV *	varlist_ref
+        SV *	perl_callback
+	PPCODE:
+	{
+           AV *varlist;
+           SV **varbind_ref;
+           AV *varbind;
+	   I32 varlist_len;
+	   I32 varlist_ind;
+	   I32 varbind_len;
+           struct snmp_session *ss;
+           struct snmp_pdu *pdu, *response;
+           struct variable_list *vars;
+           struct variable_list *last_vars;
+           struct tree *tp;
+           int len;
+	   oid *oid_arr;
+	   int oid_arr_len = MAX_OID_LEN;
+           SV *tmp_sv;
+           int type;
+	   char tmp_type_str[MAX_TYPE_NAME_LEN];
+           SV **sess_ptr_sv;
+           SV **err_str_svp;
+           SV **err_num_svp;
+           SV **err_ind_svp;
+           int status;
+	   char str_buf[STR_BUF_SIZE];
+           char *label;
+           char *iid;
+           char *cp;
+           int getlabel_flag = NO_FLAGS;
+           int sprintval_flag = USE_BASIC;
+           int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
+	   SV *rv;
+
+           oid_arr = (oid*)malloc(sizeof(oid) * MAX_OID_LEN);
+
+           if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
+
+              sess_ptr_sv = hv_fetch((HV*)SvRV(sess_ref), "SessPtr", 7, 1);
+	      ss = (SnmpSession *)SvIV((SV*)SvRV(*sess_ptr_sv));
+              err_str_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorStr", 8, 1);
+              err_num_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorNum", 8, 1);
+              err_ind_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorInd", 8, 1);
+              sv_setpv(*err_str_svp, "");
+              sv_setiv(*err_num_svp, 0);
+              sv_setiv(*err_ind_svp, 0);
+	      if (SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseLongNames", 12, 1)))
+                 getlabel_flag |= USE_LONG_NAMES;
+	      if (SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseEnums", 8, 1)))
+                 sprintval_flag = USE_ENUMS;
+	      if (SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseSprintValue", 14, 1)))
+                 sprintval_flag = USE_SPRINT_VALUE;
+
+              pdu = snmp_pdu_create(SNMP_MSG_GETBULK);
+
+	      pdu->errstat = nonrepeaters;
+	      pdu->errindex = maxrepetitions;
+
+              varlist = (AV*) SvRV(varlist_ref);
+              varlist_len = av_len(varlist);
+	      for(varlist_ind = 0; varlist_ind <= varlist_len; varlist_ind++) {
+                 varbind_ref = av_fetch(varlist, varlist_ind, 0);
+                 if (SvROK(*varbind_ref)) {
+                    varbind = (AV*) SvRV(*varbind_ref);
+                    __tag2oid(__av_elem_pv(varbind, VARBIND_TAG_F, "0"),
+                              __av_elem_pv(varbind, VARBIND_IID_F, NULL),
+                              oid_arr, &oid_arr_len, NULL);
+
+
+                    if (oid_arr_len) {
+  		       snmp_add_null_var(pdu, oid_arr, oid_arr_len);
+		    } else {
+                       if (verbose)
+                          warn("error: set: unknown object ID");
+	               sv_catpv(*err_str_svp, 
+                               (char*)snmp_api_errstring(SNMPERR_UNKNOWN_OBJID));
+                       sv_setiv(*err_num_svp, SNMPERR_UNKNOWN_OBJID);
+                       XPUSHs(&sv_undef); /* unknown OID */
+		       snmp_free_pdu(pdu);
+		       goto done;
+		    }
+
+
+                 } /* if var_ref is ok */
+              } /* for all the vars */
+
+              if (SvTRUE(perl_callback)) {
+                 perl_callback = newSVsv(perl_callback);
+                 # it might be more efficient to pass the varbind_ref to
+                 # __snmp_xs_cb as part of perl_callback so it is not freed
+                 # and reconstructed for each call
+                 status = snmp_async_send(ss,pdu,__snmp_xs_cb,perl_callback);
+                 if (status != 0) {
+                    XPUSHs(sv_2mortal(newSViv(status))); /* push the reqid?? */
+                 } else {
+                    snmp_free_pdu(pdu);
+                    sv_catpv(*err_str_svp, 
+                             (char*)snmp_api_errstring(ss->s_snmp_errno));
+                    sv_setiv(*err_num_svp, ss->s_snmp_errno);
+                    XPUSHs(&sv_undef);
+                 }
+		 goto done;
+              }
+
+	      status = __send_sync_pdu(ss, pdu, &response,
+				       NO_RETRY_NOSUCH,
+                                       *err_str_svp, *err_num_svp,
+				       *err_ind_svp);
+
+	      av_clear(varlist);
+
+	      if(response && response->variables) {
+              for(vars = response->variables;
+                  vars;
+                  vars = vars->next_variable) {
+
+                    varbind = (AV*) newAV();
+                    *str_buf = '.';
+                    tp = get_symbol(vars->name,vars->name_length,
+                                    get_tree_head(),str_buf+1);
+                    if (__is_leaf(tp)) {
+                       type = tp->type;
+                    } else {
+                       getlabel_flag |= NON_LEAF_NAME;
+                       type = __translate_asn_type(vars->type);
+                    }
+                    __get_label_iid(str_buf,&label,&iid,getlabel_flag);
+
+		    av_store(varbind, VARBIND_TAG_F,
+			     newSVpv(label, strlen(label)));
+		    av_store(varbind, VARBIND_IID_F,
+			     newSVpv(iid, strlen(iid)));
+
+                    __get_type_str(type, tmp_type_str);
+		    av_store(varbind, VARBIND_TYPE_F, newSVpv(tmp_type_str,
+				     strlen(tmp_type_str)));
+
+                    len=__sprint_value(str_buf,vars,tp,type,sprintval_flag);
+                    tmp_sv = newSVpv((char*)str_buf, len);
+		    av_store(varbind, VARBIND_VAL_F, tmp_sv);
+
+		    rv = newRV_noinc((SV *)varbind);
+		    sv_bless(rv, gv_stashpv("SNMP::Varbind",0));
+		    av_push(varlist, rv);
+
+                    XPUSHs(sv_mortalcopy(tmp_sv));
+                 }
+              } else {
+                    XPUSHs(&sv_undef);
+	      }
 
               if (response) snmp_free_pdu(response);
 
@@ -1875,13 +2268,13 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
 		  if (verbose) warn("invalid enterprise id: %s", enterprise);
 	      }
               if (agent && strlen(agent)) {
-                 pdu->agent_addr.sin_addr.s_addr = __parse_address(agent);
-                 if (pdu->agent_addr.sin_addr.s_addr == -1 && verbose) {
+                 SIN_ADDR(pdu->address).s_addr = __parse_address(agent);
+                 if (SIN_ADDR(pdu->address).s_addr == -1 && verbose) {
                     warn("invalid agent address: %s", agent);
                     goto err;
                  }
               } else {
-                 pdu->agent_addr.sin_addr.s_addr = get_myaddr();
+                 SIN_ADDR(pdu->address).s_addr = get_myaddr();
               }
               pdu->trap_type = generic;
               pdu->specific_type = specific;
@@ -1891,7 +2284,7 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
                  snmp_perror("snmptrap");
               }	
               snmp_free_pdu(pdu); /* no response so we can always free pdu */
-	      XPUSHs(sv_2mortal(newSViv(snmp_get_errno())));
+              XPUSHs(sv_2mortal(newSViv(ss->s_snmp_errno)));
            } else {
 err:
               /* BUG!!! need to return an error value */
@@ -1899,6 +2292,8 @@ err:
            }
 	Safefree(oid_arr);
         }
+
+
 
 int
 snmp_trapV2(sess_ref,dstParty,srcParty,trap_oid,uptime,varlist_ref)
@@ -1936,6 +2331,9 @@ snmp_trapV2(sess_ref,dstParty,srcParty,trap_oid,uptime,varlist_ref)
            struct enum_list *ep;
 
            oid_arr = (oid*)malloc(sizeof(oid) * MAX_OID_LEN);
+
+                        warn("error: NOT IMPLEMENTED");
+	                goto err;
 
            if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
 
@@ -2005,7 +2403,7 @@ snmp_trapV2(sess_ref,dstParty,srcParty,trap_oid,uptime,varlist_ref)
 
               if (response) snmp_free_pdu(response);
 
-	      XPUSHs(sv_2mortal(newSViv(snmp_get_errno())));
+              XPUSHs(sv_2mortal(newSViv(ss->s_snmp_errno)));
            } else {
 err:
               /* BUG!!! need to return an error value */
@@ -2239,6 +2637,63 @@ snmp_main_loop(timeout_sec,timeout_usec,perl_callback)
            return;
 	}
 
+ 
+void
+snmp_get_select_info()
+	PPCODE:
+	{
+        int numfds, fd_count;
+        fd_set fdset;
+        struct timeval time_val, *tvp;
+        int block;
+	int timeout_sec;
+	int timeout_usec;
+	int i;
+
+        numfds = 0;
+        block = 1;
+        tvp = &time_val;
+        FD_ZERO(&fdset);
+        snmp_select_info(&numfds, &fdset, tvp, &block);	
+	XPUSHs(sv_2mortal(newSViv(block)));
+	if(block){
+            XPUSHs(sv_2mortal(newSViv(0))); 
+            XPUSHs(sv_2mortal(newSViv(0))); 
+	} else {
+            XPUSHs(sv_2mortal(newSViv(tvp->tv_sec)));
+            XPUSHs(sv_2mortal(newSViv(tvp->tv_usec)));
+	}				
+	if ( numfds ) {
+            for(i=0; i<numfds ; i++) {
+                if(FD_ISSET(i, &fdset)){
+                    XPUSHs(sv_2mortal(newSViv(i)));
+                }
+            }
+	} else {
+            XPUSHs(&sv_undef);  /* no mem or bad args */
+	}
+	}
+ 
+void
+snmp_read_on_fd(fd)             
+	int fd
+	CODE:
+	{
+           fd_set fdset;
+          
+           FD_ZERO(&fdset);
+           FD_SET(fd, &fdset);	
+          
+           snmp_read(&fdset);
+	}
+ 
+void
+snmp_check_timeout()
+	CODE:
+	{
+          snmp_timeout();
+	} 
+
 MODULE = SNMP	PACKAGE = SNMP::MIB::NODE 	PREFIX = snmp_mib_node_
 SV *
 snmp_mib_node_TIEHASH(class,key,tp=0)
@@ -2266,10 +2721,12 @@ snmp_mib_node_FETCH(tp_ref, key)
 	   char c = *key;
 	   char str_buf[STR_BUF_SIZE];
            SnmpMibNode *tp = NULL;
+           struct index_list *ip;
            struct enum_list *ep;
            struct module *mp;
            SV *child_list_aref, *next_node_href, *mib_tied_href, **nn_hrefp;
            HV *mib_hv, *enum_hv;
+           AV *index_av;
            MAGIC *mg;
 
            if (SvROK(tp_ref)) tp = (SnmpMibNode*)SvIV((SV*)SvRV(tp_ref));
@@ -2470,6 +2927,14 @@ snmp_mib_node_FETCH(tp_ref, key)
                  }
                  sv_setsv(ST(0), newRV((SV*)enum_hv));
                  break;
+              case 'i': /* indexes */
+                 if (strncmp("indexes", key, strlen(key))) break;
+                 index_av = newAV();
+                 for(ip=tp->indexes; ip != NULL; ip = ip->next) {
+                    av_push(index_av,newSVpv((ip->ilabel),strlen(ip->ilabel)));
+                 }
+                sv_setsv(ST(0), newRV((SV*)index_av));
+                break;
 	      case 'd': /* description */
                  if (strncmp("description", key, strlen(key))) break;
                  sv_setpv(ST(0),tp->description);

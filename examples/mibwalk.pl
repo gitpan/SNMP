@@ -2,7 +2,7 @@
 # stop on error at end of MIB
 
 use SNMP 1.8;
-
+$SNMP::use_sprint_value = 1;
 my $host = shift || localhost;
 my $comm = shift || public;
 

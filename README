@@ -1,6 +1,6 @@
-		   Perl5 SNMP Extension Module v1.8.2
-		       for the UCD SNMP Library
-		G.S. Marzot (gmarzot@nortelnetworks.com)
+	      The Perl5 'SNMP' Extension Module v3.1.0  
+		      for the UCD SNMPv3 Library
+	       G.S. Marzot (gmarzot@nortelnetworks.com)
 
 Contents:
    Introduction:
@@ -16,87 +16,97 @@ Contents:
 
 Introduction:
 
-This is a Perl5 extension module which provides a full featured SNMP
-client side API.  The SNMP module internals rely on the UCD SNMP
-client library toolkit. The UCD SNMP library was originally based on
-version 2.1.2.1 of the CMU SNMP library but has incorporated many
-bugfixes and enhancements. For information on the UCD SNMP library see
-the documentation provided with the UCD SNMP distribution or the
-ucd-snmp project web page: http://ucd-snmp.ucdavis.edu
+This is a Perl5 extension module which provides a full featured SNMPv3
+protocol operation API. An interface to the MIB module parse-tree is
+also provided.  The SNMP module internals rely on the UCD SNMPv3
+library (ucd-snmp-4.x libsnmp). For information on the UCD SNMP
+library see the documentation provided with the UCD SNMP distribution
+or the ucd-snmp project web page: http://ucd-snmp.ucdavis.edu
 
-(NOTE: In previous releases this module was compatible with both the
+(Note: In previous releases this module was compatible with both the
 UCD and CMU SNMP libraries. Starting with Perl5/SNMP-1.7 this module
 will *only* work with the UCD SNMP library due to dependence on new
 features)
 
 Availability:
 
-The most recent release of the UCD SNMP Libray can be found at:
+The most recent release of the Perl5 SNMP module can be found at the
+following ftp site (as well as the usual perl archives, CPAN):
+ftp://ftp-east.baynetworks.com/netman/snmp/perl5/SNMP.tar.gz
+
+The most recent release of the UCD SNMPv3(ucd-snmp-4.x) Libray can be
+found at:
 ftp://ucd-snmp.ucdavis.edu
 
-The most recent release of the Perl5/SNMP module can be found at:
-ftp://ftp-east.baynetworks.com/netman/snmp/perl5/SNMP.tar.gz
-(as well as the usual perl archives, CPAN)
-
 Supported Platforms:
-	SunOS 4.1.x
-	Solaris 2.x
-	Linux 1.2.x, 2.0.x
-	Many other UNIX variants
 	Win9x/NT
+	Linux 1.2.x, 2.x
+	Solaris 2.x
+	Many other UNIX variants
 
 Release Notes:
 
-SNMP version 1.8.1 is known to interoperate w/ ucd-snmp-3.5.3 thru
-3.6.2.  WARNING: ucd-snmp-3.6.1 has a memory bug which will cause
-problems when used with this module (upgrade to ucd-snmp-3.6.2).
+SNMP module version 3.0.0b1 is being developed against UCD SNMP
+4.0.pre6. 3.0.0b1 is a temporary beta release - it is likely
+incomplete and/or buggy (as always your help is appreciated).
 Compatibility with earlier or later versions of ucd-snmp is not
-guaranteed due to the dynamic nature of free software development :).
+guaranteed due to the dynamic nature of open software development :).
+
+the latest stable release is SNMP-1.8.1 and ucd-snmp-3.6.2.
+
+to get ucd-snmp-4.0pre6 to build on my linux RH6.0 system had to
+change agent/mibgroup/mibII/interfaces.c:#include <ioctls.h> to
+agent/mibgroup/mibII/interfaces.c:#include <bits/ioctls.h> also had to
+hand install snmplib/{scapi.h, keytools.h, snmpv3.h, transform_oids.h}
+
 
 Installation:
 
-build and install ucd-snmp
+Build and install the UCD SNMP package - see UCD SNMP README and
+INTSALL docs.
 
-note: you should ensure that any previous ucd-snmp or cmu snmp
+Note: you should ensure that any previous ucd-snmp or cmu snmp
 installation is located so that the wrong libsnmp or headers are not
 used by mistake).
+
+Unix:
 
 perl Makefile.PL
 make
 make test
 make install
 
-Win32 
+Win32:
 
-(note: only builds on NT as far as I know. requires VC++ 5.0-6.0, be
+(Note: only builds on NT as far as I know. requires VC++ 5.0-6.0, be
        sure to run vcvars32.bat first)
 
-for ActiveState Perl  (tested with ASPerl5.005_03 (515))
+for ActiveState Perl  (tested with AS Perl5.005_03 (515))
 
 perl Makefile.PL CAPI=TRUE
 nmake
 nmake test
 nmake install
 
-for gsarathy's perl5.004_02
+for the older perl5.004_02 distribution by gsarathy
 
-perl Makefile.PL CAPI=TRUE
+perl Makefile.PL
 nmake
 nmake test
 nmake install
 
-note: 'make test' requires that an agent is running to which you have
-read/write access. For the ucd-snmp snmpd this may involve setting up
-the snmpd.conf file with read-write access for 'private'
+Note: 'make test' requires that an agent is running to which you have
+read/write access. For the UCD SNMP agent (snmpd) this will involve
+setting up the snmpd.conf file with read-write access for the community chosen during the 'perl Makefile.PL' step ('private' by default).
 
 Operational Description:
 
-The basic operations of the SNMP protocol are provided by this module 
-through an object oriented interface for modularity and ease of use. 
-The primary class is SNMP::Session which encapsulates the persistent 
-aspects of a connection between the management application and the 
-managed agent. Internally the class is implemented as a blessed hash 
-reference. This class supplies 'get', 'getnext', 'set', 'fget', and 
+The basic operations of the SNMP protocol are provided by this module
+through an object oriented interface for modularity and ease of use.
+The primary class is SNMP::Session which encapsulates the persistent
+aspects of a connection between the management application and the
+managed agent. Internally the class is implemented as a blessed hash
+reference. This class supplies 'get', 'getnext', 'set', 'fget', and
 'fgetnext' method calls. The methods take a variety of input argument
 formats and support both syncronous and asyncronous operation through
 a polymorphic API (i.e., method behaviour varies dependent on args
@@ -109,7 +119,7 @@ SNMP::Session
 public:
  DestHost    - default 'localhost', hostname or ip addr of SNMP agent
  Community   - default 'public', SNMP community string (used for both R/W)
- Version     - default '1', [2 (same as 2c), 2c, 3 (not implemented)]
+ Version     - default '1', [2 (same as 2c), 2c, 3]
  RemotePort  - default '161', allow remote UDP port to be overriden
  Timeout     - default '1000000', micro-seconds before retry
  Retries     - default '5', retries before failure
@@ -118,6 +128,18 @@ public:
                undef will be returned for all NOSUCH varbinds, when set
                to '0' this feature is disabled and the entire get request
                will fail on any NOSUCH error (applies to v1 only)
+ SecName     - default 'initial', security name (v3)
+ SecLevel    - default 'noAuthNoPriv', security level [noAuthNoPriv,
+               authNoPriv, authPriv] (v3)
+ SecEngineId - default <none>, security engineID, will be probed if not
+               supplied (v3)
+ ContextEngineId - default <SecEngineId>, context engineID, will be
+                   probed if not supplied (v3)
+ Context     - default '', context name (v3)
+ AuthProto   - default 'MD5', authentication protocol [MD5, SHA] (v3)
+ AuthPass    - default <none>, authentication passphrase
+ PrivProto   - default 'DES', privacy protocol [DES] (v3)
+ PrivPass    - default <none>, privacy passphrase (v3)
  VarFormats  - default 'undef', used by 'fget[next]', holds an hash
                reference of output value formatters, (e.g., {<obj> =>
                <sub-ref>, ... }, <obj> must match the <obj> and format
@@ -129,8 +151,8 @@ public:
                reference of output value formatters, (e.g., {<type> =>
                <sub-ref>, ... }, the supplied sub is called to translate
                the value to a new format, unless a VarFormat mathces first
-               (e.g., $session->{TypeFormats}{INTEGER} = \&mapEnum(); 
-                although this can be done more efficiently by enabling 
+               (e.g., $session->{TypeFormats}{INTEGER} = \&mapEnum();
+                although this can be done more efficiently by enabling
                 $SNMP::use_enums or session creation param 'UseEnums')
  UseLongNames - defaults to the value of SNMP::use_long_names at time
                of session creation. set to non-zero to have <tags>
@@ -140,7 +162,7 @@ public:
                of session creation. set to non-zero to have return values
                for 'get' and 'getnext' methods formatted with the libraries
                sprint_value function. This will result in certain data types
-               being returned in non-canonical format NOTE: values returned
+               being returned in non-canonical format Note: values returned
                with this option set may not be appropriate for 'set' operations
                (see discussion of value formats in <vars> description section)
  UseEnums    - defaults to the value of SNMP::use_enums at time of session
@@ -161,31 +183,31 @@ methods:
                    (e.g., $session = new SNMP::Session(DestHost => 'foo',
                    Community => 'private');), returns an object reference
                    or undef in case of error.
- update(<fields>)- Updates the SNMP::Session object with the values fields 
+ update(<fields>)- Updates the SNMP::Session object with the values fields
                    passed in as a hash list (similar to new(<fields>))
                    (WARNING! not fully implemented)
- get(<vars>[,<callback>]) 
+ get(<vars>[,<callback>])
                  - do SNMP GET, multiple <vars> formats accepted.
                    for syncronous operation <vars> will be updated
                    with value(s) and type(s) and will also return
                    retrieved value(s). If <callback> supplied method
                    will operate asyncronously
- fget(<vars>[,<callback>])    
+ fget(<vars>[,<callback>])
                  - do SNMP GET like 'get' and format the values according
                    the handlers specified in $sess->{VarFormats} and
                    $sess->{TypeFormats}
- getnext(<vars>[,<callback>]) 
+ getnext(<vars>[,<callback>])
                  - do SNMP GETNEXT, multiple <vars> formats accepted,
                    returns retrieved value(s), <vars> passed as arguments are
                    updated to indicate next lexicographical <obj>,<iid>,<val>,
-                   and <type> NOTE: simple string <vars>,(e.g., 'sysDescr.0')
+                   and <type> Note: simple string <vars>,(e.g., 'sysDescr.0')
                    form is not updated. If <callback> supplied method
                    will operate asyncronously
  fgetnext(<vars>[,<callback>])
                  - do SNMP GETNEXT like getnext and format the values according
                    the handlers specified in $sess->{VarFormats} and
                    $sess->{TypeFormats}
- set(<vars>[,<callback>])     
+ set(<vars>[,<callback>])
                  - do SNMP SET, multiple <vars> formats accepted.
                    the value field in all <vars> formats must be in a canonical
                    format (i.e., well known format) to ensure unambiguous
@@ -214,19 +236,19 @@ methods:
                                                              # always last
  or v2 format
  trap(srcParty, dstParty, oid, uptime, <vars>)  - * Not Implemented *
-    $sess->trap(srcParty => party1, 
+    $sess->trap(srcParty => party1,
                 dstParty => party2,
                 oid => 'snmpRisingAlarm',
-                uptime => 1234, 
+                uptime => 1234,
                 [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
                                                              # always last
 
- 
+
 Acceptable variable formats:
 <vars> may be one of the following forms:
 
  SNMP::VarList:  - represents an array of MIB objects to get or set,
-                   implemented as a blessed reference to an array of 
+                   implemented as a blessed reference to an array of
                    SNMP::Varbinds, (e.g., [<varbind1>, <varbind2>, ...])
 
  SNMP::Varbind:  - represents a single MIB object to get or set, implemented as
@@ -276,12 +298,12 @@ Acceptable variable formats:
                    single attribute without constructing an SNMP::Varbind.
                    stored in a perl scalar, has the form '<tag>.<iid>',
                    (e.g., 'sysDescr.0'). for 'set' operations the value
-                   is passed as a second arg. NOTE: This argument form is
+                   is passed as a second arg. Note: This argument form is
                    not updated in get[next] operations as are the other forms.
 
 Acceptable callback formats:
 <callback> may be one of the following forms:
- 
+
  without arguments:
     \&subname
     sub { ... }
@@ -292,12 +314,12 @@ Acceptable callback formats:
 
 callback will be called when response is received or timeout
 occurs. the last argument passed to callback will be a
-SNMP::VarList reference. In case of timeout the last argument 
-will be undef
+SNMP::VarList reference. In case of timeout the last argument
+will be undef.
 
 SNMP package variables and functions:
 
- $SNMP::VERSION       - the current version specifier (e.g., 1.8)
+ $SNMP::VERSION       - the current version specifier (e.g., 3.0)
 
  $SNMP::auto_init_mib - default '1', set to 0 to disable automatic reading
                         of the MIB upon session creation. set to non-zero
@@ -305,7 +327,7 @@ SNMP package variables and functions:
                         in MIB loading according to UCD env. variables (see
                         man mib_api)
 
- $SNMP::verbose       - default '0', controls warning/info output of 
+ $SNMP::verbose       - default '0', controls warning/info output of
                         SNMP module, 0 => no output, 1 => enables warning/info
                         output from SNMP module itself (is also controlled
                         by SNMP::debugging - see below)
@@ -319,7 +341,7 @@ SNMP package variables and functions:
  $SNMP::use_sprint_value - default '0', set to non-zero to enable formatting of
                         response values using the snmp libraries sprint_value
                         function. can also be set on a per session basis (see
-                        UseSprintValue) NOTE: returned values may not be
+                        UseSprintValue) Note: returned values may not be
                         suitable for 'set' operations
 
  $SNMP::use_enums     - default '0',set non-zero to return values as enums and
@@ -327,26 +349,27 @@ SNMP package variables and functions:
                         will still be accepted for set operations. can also be
                         set on a per session basis (see UseEnums)
 
- $SNMP::save_descriptions - default '0',set non-zero to have mib parser save 
-                        attribute descriptions. must be set prior to mib 
+ $SNMP::save_descriptions - default '0',set non-zero to have mib parser save
+                        attribute descriptions. must be set prior to mib
                         initialization
 
  $SNMP::debugging     - default '0', controlls debugging output level
                         within SNMP module and libsnmp
                         1 => enables 'SNMP::verbose' (see above)
-                        2 => level 1 plus snmp_set_do_debugging(1), 
+                        2 => level 1 plus snmp_set_do_debugging(1),
                         3 => level 2 plus snmp_set_dump_packet(1)
 
- $SNMP::dump_packet   - default '0', set [non-]zero to independently set 
+ $SNMP::dump_packet   - default '0', set [non-]zero to independently set
                         snmp_set_dump_packet()
 
- %SNMP::MIB           - a tied hash to access parsed MIB information. After 
-                        the MIB has been loaded this hash allows access to  
-                        to the parsed in MIB meta-data. The hash returns 
+ %SNMP::MIB           - a tied hash to access parsed MIB information. After
+                        the MIB has been loaded this hash allows access to
+                        to the parsed in MIB meta-data(the structure of the
+                        MIB (i.e., schema)). The hash returns blessed
                         references to SNMP::MIB::NODE objects which represent
                         a single MIB attribute. The nodes can be fetched with
                         multiple 'key' formats - the leaf name (e.g.,sysDescr)
-                        or fully/partially qualified name (e.g., 
+                        or fully/partially qualified name (e.g.,
                         system.sysDescr) or fully qualified numeric OID. The
                         returned node object supports the following fields:
 
@@ -358,9 +381,9 @@ SNMP package variables and functions:
         children      - array reference of children nodes
         nextNode      - next lexico node (BUG!does not return in lexico order)
         type          - returns application type (see getType for values)
-        access        - returns ACCESS (ReadOnly, ReadWrite, WriteOnly, 
+        access        - returns ACCESS (ReadOnly, ReadWrite, WriteOnly,
                         NoAccess, Notify, Create)
-        status        - returns STATUS (Mandatory, Optional, Obsolete, 
+        status        - returns STATUS (Mandatory, Optional, Obsolete,
                         Deprecated)
         syntax        - returns 'textualConvention' if defined else 'type'
         textualConvention - returns TEXTUAL-CONVENTION
@@ -376,8 +399,8 @@ SNMP package variables and functions:
                          variables. called with no args acts like initMib,
                          loading MIBs indicated by environment variables (see
                          ucd mib_api docs). passing non-zero second arg
-                         forces previous mib to be freed and replaced 
-                         (note: second arg not working since freeing previous 
+                         forces previous mib to be freed and replaced
+                         (Note: second arg not working since freeing previous
                           Mib is more involved than before).
 
  &SNMP::initMib()     - calls library init_mib function if Mib not already
@@ -421,71 +444,71 @@ SNMP package variables and functions:
 
  &SNMP::mapEnum(<var>) - converts integer value to enumertion tag defined
                          in Mib or converts tag to integer depending on
-                         input. the function will return the corresponding 
+                         input. the function will return the corresponding
                          integer value *or* tag for a given MIB attribute
-                         and value. The function will sense which direction 
-                         to perform the conversion. Various arg formats are 
+                         and value. The function will sense which direction
+                         to perform the conversion. Various arg formats are
                          supported
-                         $val = SNMP::mapEnum($varbind); 
+                         $val = SNMP::mapEnum($varbind);
                          # where $varbind is SNMP::Varbind or equiv
                          # note: $varbind will be updated
                          $val = SNMP::mapEnum('ipForwarding', 'forwarding');
                          $val = SNMP::mapEnum('ipForwarding', 1);
 
- &SNMP::MainLoop([<timeout>, [<callback>]])  
+ &SNMP::MainLoop([<timeout>, [<callback>]])
                    - to be used with async SNMP::Session
                      calls. MainLoop must be called after initial async calls
-                     so return packets from the agent will not be processed. 
+                     so return packets from the agent will not be processed.
                      If no args suplied this function enters an infinite loop
-                     so program must be exited in a callback or externally 
+                     so program must be exited in a callback or externally
                      interupted. If <timeout
 
-Exported SNMP utility functions 
-&snmp_get() - takes args of SNMP::Session::new followed by those of 
+Exported SNMP utility functions
+&snmp_get() - takes args of SNMP::Session::new followed by those of
               SNMP::Session::get
 
-&snmp_getnext() - takes args of SNMP::Session::new followed by those of 
+&snmp_getnext() - takes args of SNMP::Session::new followed by those of
                   SNMP::Session::getnext
 
-&snmp_set() - takes args of SNMP::Session::new followed by those of 
+&snmp_set() - takes args of SNMP::Session::new followed by those of
               SNMP::Session::set
 
-&snmp_trap() - takes args of SNMP::TrapSession::new followed by those of 
+&snmp_trap() - takes args of SNMP::TrapSession::new followed by those of
                SNMP::TrapSession::trap
 
-note: utility functions do not support async operation yet.
+Note: utility functions do not support async operation yet.
 
 Trouble Shooting:
 
 If problems occur there are number areas to look at to narrow down the
 possibilities.
 
-The first step should be to test the UCD installation independently from
-the Perl5/SNMP interface. 
+The first step should be to test the UCD SNMP installation
+independently from the Perl5 SNMP interface.
 
-Try running the apps from the UCD distribution. 
+Try running the apps from the UCD SNMP distribution.
 
-Make sure your agent is running and properly configured with
-read-write access for the community you are using
+Make sure your agent (snmpd) is running and properly configured with
+read-write access for the community you are using.
 
 Ensure that your MIBs are installed and enviroment variables are set
 appropriately (see man mib_api)
 
 Be sure to remove old ucd-snmp installations and ensure headers and
-libraries from old CMU installations are not being used by mistake
+libraries from old CMU installations are not being used by mistake.
 
 If the problem occurs during compilation/linking check that the snmp
-library being linked is actually the UCD library (there have been name
-conflicts with existing snmp libs). 
+library being linked is actually the UCD SNMP library (there have been
+name conflicts with existing snmp libs).
 
-Also check that the header files are correct and up to date. 
+Also check that the header files are correct and up to date.
 
-Sometimes compiling the UCD snmp library with
+Sometimes compiling the UCD SNMP library with
 'position-independent-code' enabled is required (HPUX specifically).
 
-if you cannot resolve the problem you can email me at
-gmarzot@nortelnetworks.com and/or ucd-snmp-coders@ucd-snmp.ucdavis.edu.
-and maybe I can help.
+If you cannot resolve the problem you can post to
+comp.lang.perl.modules or email me at gmarzot@nortelnetworks.com
+and/or ucd-snmp-coders@ucd-snmp.ucdavis.edu.
 
 please give sufficient information to analyze the problem (OS type,
 versions for OS/Perl/UCD/compiler, complete error output, etc.)
@@ -493,7 +516,7 @@ versions for OS/Perl/UCD/compiler, complete error output, etc.)
 Acknowledments:
 
 Many thanks to all those who supplied patches, suggestions and
-feedback. 
+feedback.
 
 Wes Hardaker and the ucd-coders
 Dave Perkins
@@ -523,19 +546,15 @@ bugs, comments, questions to gmarzot@nortelnetworks.com
 ------
 History:
 
-Bugs fixed and changes in 1.8.2 
-
-1) fixed mib parse problem - "Bad operator(DEFINITIONS): At line 1 in..."
-
 Bugs fixed and changes in 1.8.1
 
 1) updated docs
 
-2) fixed #defines from AMX_NAME_LEN to MAX_OID_LEN (mslifcak)
+2) fixed #defines from MAX_NAME_LEN to MAX_OID_LEN (mslifcak)
 
 3) reverted __tag2oid to use read_objid rather than get_node. this
 gives full name resolution provided by libsnmp and no longer creates
-problesm on failure since 3.6.2 removes the call to 'exit' in
+problems on failure since 3.6.2 removes the call to 'exit' in
 read_objid
 
 4) fixed Makefile.PL to use win32 'type' vs. 'cat'
@@ -552,7 +571,7 @@ Bugs fixed and changes in 1.8
 
 4) added $SNMP::debugging to dynmically control libsnmp debugging output
 
-5) added $SNMP::save_descriptions to control libsnmp parsing/saving 
+5) added $SNMP::save_descriptions to control libsnmp parsing/saving
    of MIB descriptions
 
 6) added $SNMP::dump_packet to control libsnmp packet dumping
@@ -570,10 +589,10 @@ Bugs fixed and changes in 1.8
 11) fixed bug with fget[next] - formatted values are supplied as return
     values as well as within args passed
 
-12) fixed Makefile to link with -kstat on solaris        
+12) fixed Makefile to link with -kstat on solaris
 
-13) fixed bug when handling noSuchName returns for getnext calls with 
-    varbinds w/ no iid supplied (__get_label_iid should not use the 
+13) fixed bug when handling noSuchName returns for getnext calls with
+    varbinds w/ no iid supplied (__get_label_iid should not use the
     FAIL_ON_NULL_IID flag)
 
 14) fixed bug with uninitialized sprintval_flag

@@ -13,8 +13,13 @@ hints/irix.pl
 t/README
 t/session.t
 t/mib.t
+t/get.t
+t/getnext.t
+t/set.t
+t/async.t
 t/mib.txt
 t/translate.t
+t/snmpd.conf
 examples/async1.pl
 examples/async2.pl
 examples/ipforward.pl
