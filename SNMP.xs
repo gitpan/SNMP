@@ -60,6 +60,8 @@ DLL_IMPORT extern struct tree *Mib;
 typedef struct snmp_session SnmpSession;
 typedef struct tree SnmpMibNode;
 
+static void __recalc_timeout _((struct timeval*,struct timeval*,
+                                struct timeval*,struct timeval*, int* ));
 static in_addr_t __parse_address _((char*));
 static int __is_numeric_oid _((char*));
 static int __is_leaf _((struct tree*));
@@ -92,7 +94,44 @@ static char* __av_elem_pv _((AV * av, I32 key, char *dflt));
 #define FAIL_ON_NULL_IID 0x01
 #define NO_FLAGS 0x00
 
-static in_addr_t __parse_address(address)
+static void 
+__recalc_timeout (tvp, ctvp, ltvp, itvp, block)
+struct timeval* tvp;
+struct timeval* ctvp;
+struct timeval* ltvp;
+struct timeval* itvp;
+int *block;
+{
+   struct timeval now;
+
+   if (!timerisset(itvp)) return;  /* interval zero means loop forever */
+   *block = 0;
+   gettimeofday(&now,(struct timezone *)0);
+
+   if (ctvp->tv_sec < 0) { /* first time or callback just fired */
+      timersub(&now,ltvp,ctvp);
+      timersub(ctvp,itvp,ctvp);
+      timersub(itvp,ctvp,ctvp);
+      timeradd(ltvp,itvp,ltvp);
+   } else {
+      timersub(&now,ltvp,ctvp);
+      timersub(itvp,ctvp,ctvp);
+   }
+
+   /* flag is set for callback but still hasnt fired so set to something
+    * small and we will service packets first if there are any ready 
+    */
+   if (!timerisset(ctvp)) ctvp->tv_usec = 50;
+
+   /* if snmp timeout > callback timeout or no more requests to process */
+   if (timercmp(tvp, ctvp, >) || !timerisset(tvp)) {
+      *tvp = *ctvp; /* use the smaller non-zero timeout */
+      timerclear(ctvp); /* used as a flag to let callback fire on timeout */
+   }
+}
+
+static in_addr_t 
+__parse_address(address)
 char *address;
 {
     in_addr_t addr;
@@ -111,7 +150,8 @@ char *address;
 
 }
 
-static int __is_numeric_oid (oidstr)
+static int 
+__is_numeric_oid (oidstr)
 char* oidstr;
 {
   if (!oidstr) return 0;
@@ -121,14 +161,16 @@ char* oidstr;
   return(1);
 }
 
-static int __is_leaf (tp)
+static int 
+__is_leaf (tp)
 struct tree* tp;
 {
    char buf[MAX_TYPE_NAME_LEN];
    return (tp && __get_type_str(tp->type,buf));
 }
 
-static SnmpMibNode* __get_next_mib_node (tp)
+static SnmpMibNode* 
+__get_next_mib_node (tp)
 SnmpMibNode* tp;
 {
    /* printf("tp = %lX, parent = %lX, peer = %lX, child = %lX\n", 
@@ -150,7 +192,7 @@ char* typestr;
 
 	if (!strncasecmp(typestr,"INTEGER",3))
             return(TYPE_INTEGER);
-	if (!strcasecmp(typestr,"COUNTER")) /* check it all in case counter64 */
+	if (!strcasecmp(typestr,"COUNTER")) /* check all in case counter64 */
             return(TYPE_COUNTER);
 	if (!strncasecmp(typestr,"GAUGE",3))
             return(TYPE_GAUGE);
@@ -221,7 +263,8 @@ int type;
 #define USE_BASIC 0
 #define USE_ENUMS 1
 #define USE_SPRINT_VALUE 2
-static int __sprint_value (buf, var, tp, type, flag)
+static int 
+__sprint_value (buf, var, tp, type, flag)
 char * buf;
 struct variable_list * var;
 struct tree * tp;
@@ -294,7 +337,8 @@ int flag;
    return(len);
 }
 
-static int __sprint_num_objid (buf, objid, len)
+static int 
+__sprint_num_objid (buf, objid, len)
 char *buf;
 oid *objid;
 int len;
@@ -308,7 +352,8 @@ int len;
    return SUCCESS;
 }
 
-static int __tp_sprint_num_objid (buf, tp)
+static int 
+__tp_sprint_num_objid (buf, tp)
 char *buf;
 SnmpMibNode *tp;
 {
@@ -323,7 +368,8 @@ SnmpMibNode *tp;
    return __sprint_num_objid(buf, op, newname + MAX_OID_LEN - op);
 }
 
-static int __scan_num_objid (buf, objid, len)
+static int 
+__scan_num_objid (buf, objid, len)
 char *buf;
 oid *objid;
 int *len;
@@ -334,19 +380,24 @@ int *len;
    cp = buf;
    while (*buf) {
       if (*buf++ == '.') {
-         *objid++ = atoi(cp);
+         sscanf(cp, "%lu", objid++);
+         /* *objid++ = atoi(cp); */
          (*len)++;
          cp = buf;
       } else {
-         if (isalpha(*buf)) return FAILURE;
+         if (isalpha(*buf)) {
+	    return FAILURE;
+         }
       }
    }
-   *objid++ = atoi(cp);
+   sscanf(cp, "%lu", objid++);
+   /* *objid++ = atoi(cp); */
    (*len)++;
    return SUCCESS;
 }
 
-static int __get_type_str (type, str)
+static int 
+__get_type_str (type, str)
 int type;
 char * str;
 {
@@ -401,7 +452,8 @@ char * str;
 /* does a destructive disection of <label1>...<labeln>.<iid> returning
    <labeln> and <iid> in seperate strings (note: will destructively
    alter input string, 'name') */
-static int __get_label_iid (name, last_label, iid, flag)
+static int 
+__get_label_iid (name, last_label, iid, flag)
 char * name;
 char ** last_label;
 char ** iid;
@@ -589,7 +641,8 @@ char * soid_str;
    strcpy(soid_buf, soid_str);
    cp = strtok(soid_buf,".");
    while (cp) {
-     doid_arr[(*doid_arr_len)++] =  atoi(cp);
+     sscanf(cp, "%lu", &(doid_arr[(*doid_arr_len)++]));
+     /* doid_arr[(*doid_arr_len)++] =  atoi(cp); */
      cp = strtok(NULL,".");
    }
    return(SUCCESS);
@@ -792,14 +845,15 @@ void *cb_data;
 
   SV* cb = (SV*)cb_data;
 
+  dSP;
+  ENTER;
+  SAVETMPS;
+
   switch (op) {
   case RECEIVED_MESSAGE:
     switch (pdu->command) {
-    case SNMP_MSG_RESPONSE:
+    case SNMP_MSG_RESPONSE: 
       {
-      dSP;
-      ENTER;
-      SAVETMPS;
       varlist = newAV();
       varlist_ref = newRV_noinc((SV*)varlist);
       sv_bless(varlist_ref, gv_stashpv("SNMP::VarList",0));
@@ -828,26 +882,24 @@ void *cb_data;
          len = __sprint_value(str_buf, vars, tp, type, sprintval_flag);
          tmp_sv = newSVpv((char*)str_buf, len);
          av_store(varbind, VARBIND_VAL_F, tmp_sv);
-      }
-      sv_2mortal(cb);
-      __push_cb_args(&cb, sv_2mortal(varlist_ref));
-      __call_callback(cb, G_DISCARD);
-      FREETMPS;
-      LEAVE;
+      } /* for */
+      } /* case SNMP_MSG_RESPONSE */
       break;
-    }
     default:;
-    }
+    } /* switch pdu->command */
     break;
 
   case TIMED_OUT:
-
+    varlist_ref = &sv_undef;
     break;
-
-
   default:;
-
-  }
+  } /* switch op */
+  sv_2mortal(cb);
+  __push_cb_args(&cb,
+                 (SvTRUE(varlist_ref) ? sv_2mortal(varlist_ref):varlist_ref));
+  __call_callback(cb, G_DISCARD);
+  FREETMPS;
+  LEAVE;
   return 1;
 }
 
@@ -2066,30 +2118,59 @@ snmp_sock_cleanup()
 	}
 
 void
-snmp_main_loop()
+snmp_main_loop(timeout_sec,timeout_usec,perl_callback)
+	int 	timeout_sec
+	int 	timeout_usec
+	SV *	perl_callback
 	CODE:
 	{
         int numfds, fd_count;
         fd_set fdset;
-        struct timeval timeout, *tvp;
+        struct timeval time_val, *tvp;
+        struct timeval last_time, *ltvp;
+        struct timeval ctimeout, *ctvp;
+        struct timeval interval, *itvp;
         int block;
+	itvp = &interval;
+	itvp->tv_sec = timeout_sec;
+	itvp->tv_usec = timeout_usec;
+        ctvp = &ctimeout;
+        ctvp->tv_sec = -1;
+        ltvp = &last_time;
+        gettimeofday(ltvp,(struct timezone*)0);
+	timersub(ltvp,itvp,ltvp);
         while (1) {
            numfds = 0;
-     
            FD_ZERO(&fdset);
            block = 1;
-           tvp = &timeout;
+           tvp = &time_val;
            timerclear(tvp);
            snmp_select_info(&numfds, &fdset, tvp, &block);
-     printf("pre-select: numfds = %ld, block = %ld\n", numfds, block);
+           __recalc_timeout(tvp,ctvp,ltvp,itvp,&block);
+           # printf("pre-select: numfds = %ld, block = %ld\n", numfds, block);
            if (block == 1) tvp = NULL; /* block without timeout */
            fd_count = select(numfds, &fdset, 0, 0, tvp);
-     printf("post-select: numfds = %ld, block = %ld\n", numfds, block);
+           #printf("post-select: fd_count = %ld,block = %ld\n",fd_count,block);
            if (fd_count > 0) {
               snmp_read(&fdset);
            } else switch(fd_count) {
               case 0:
                  snmp_timeout();
+                 if (!timerisset(ctvp)) {
+                    if (SvTRUE(perl_callback)) {
+                       dSP;
+                       ENTER;
+                       SAVETMPS;
+                       /* sv_2mortal(perl_callback); */
+                       __push_cb_args(&perl_callback, NULL);
+                       __call_callback(perl_callback, G_DISCARD);
+                       FREETMPS;
+                       LEAVE;
+                       ctvp->tv_sec = -1;
+                    } else {
+                       goto done;
+                    }
+                 }
                  break;
               case -1:
                  if (errno == EINTR) {
@@ -2101,6 +2182,8 @@ snmp_main_loop()
               default:;
            }
         }
+     done:
+           return;
 	}
 
 MODULE = SNMP	PACKAGE = SNMP::MIB::NODE 	PREFIX = snmp_mib_node_
@@ -2112,8 +2195,13 @@ snmp_mib_node_TIEHASH(class,key,tp=0)
 	CODE:
 	{
            if (!tp) tp = (IV)__tag2oid(key, NULL, NULL, NULL, NULL);
-           ST(0) = sv_newmortal();
-           if (tp) sv_setref_iv(ST(0), class, tp);
+           if (tp) {
+              ST(0) = sv_newmortal();
+              sv_setref_iv(ST(0), class, tp);
+           } else {
+              ST(0) = &sv_undef;
+           }
+
 	}
 
 SV *
@@ -2343,3 +2431,4 @@ snmp_session_DESTROY(sess_ptr)
 	{
            snmp_close( sess_ptr );
 	}
+

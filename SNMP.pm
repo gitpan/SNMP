@@ -64,6 +64,11 @@ bootstrap SNMP;
 # Preloaded methods go here.
 
 # Package variables
+tie $SNMP::debugging, SNMP::DEBUGGING;
+tie $SNMP::dump_packet, SNMP::DUMP_PACKET;
+tie %SNMP::MIB, SNMP::MIB;
+tie $SNMP::save_descriptions, SNMP::MIB::SAVE_DESCR;
+
 $auto_init_mib = 1; # enable automatic MIB loading at session creation time
 $use_long_names = 0; # non-zero to prefer longer mib textual identifiers rather
                    # than just leaf indentifiers (see translateObj)
@@ -88,11 +93,6 @@ $dump_packet = 0; # non-zero to globally enable libsnmp dump_packet output.
                   # is also enabled when $debugging >= 2
 $save_descriptions = 0; #tied scalar to control saving descriptions during
                # mib parsing - must be set prior to mib loading
-
-tie $SNMP::debugging, SNMP::DEBUGGING;
-tie $SNMP::dump_packet, SNMP::DUMP_PACKET;
-tie %SNMP::MIB, SNMP::MIB;
-tie $SNMP::save_descriptions, SNMP::MIB::SAVE_DESCR;
 
 sub setMib {
 # loads mib from file name provided
@@ -262,7 +262,11 @@ sub snmp_trap {
 }
 
 sub MainLoop {
-  SNMP::_main_loop();
+    my $time = shift;
+    my $callback = shift;
+    my $time_sec = int $time;
+    my $time_usec = int(($time-$time_sec)*1000000);
+    SNMP::_main_loop($time_sec,$time_usec,$callback);
 }
 
 package SNMP::Session;
@@ -389,7 +393,7 @@ sub set {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
      my $val = shift;
      $varbind_list_ref = [[$tag, $iid, $val]];
    }
@@ -411,7 +415,7 @@ sub get {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
      $varbind_list_ref = [[$tag, $iid]];
    }
 
@@ -435,7 +439,7 @@ sub fget {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
      $varbind_list_ref = [[$tag, $iid]];
    }
 
@@ -466,7 +470,7 @@ sub getnext {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
      $varbind_list_ref = [[$tag, $iid]];
    }
 
@@ -490,7 +494,7 @@ sub fgetnext {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     my ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^((?:\.\d+)+|\w+)\.?(.*)$/);
      $varbind_list_ref = [[$tag, $iid]];
    }
 
@@ -687,20 +691,20 @@ package SNMP::DEBUGGING;
 # $SNMP::debugging == 3    =>   enables packet_dump from libsnmp as well
 sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }
 
-sub FETCH { $$_[0]; }
+sub FETCH { ${$_[0]}; }
 
 sub STORE { 
     $SNMP::verbose = $_[1];
     SNMP::_set_debugging($_[1]>1); 
     $SNMP::dump_packet = ($_[1]>2); 
-    $$_[0] = $_[1]; 
+    ${$_[0]} = $_[1]; 
 }
 
 sub DELETE { 
     $SNMP::verbose = 0; 
     SNMP::_set_debugging(0); 
     $SNMP::dump_packet = 0; 
-    $$_[0] = undef; 
+    ${$_[0]} = undef; 
 }
 
 package SNMP::DUMP_PACKET;
@@ -708,11 +712,11 @@ package SNMP::DUMP_PACKET;
 
 sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }
 
-sub FETCH { $$_[0]; }
+sub FETCH { ${$_[0]}; }
 
-sub STORE { SNMP::_dump_packet($_[1]); $$_[0] = $_[1]; }
+sub STORE { SNMP::_dump_packet($_[1]); ${$_[0]} = $_[1]; }
 
-sub DELETE { SNMP::_dump_packet(0); $$_[0] = 0; }
+sub DELETE { SNMP::_dump_packet(0); ${$_[0]} = 0; }
 
 package SNMP::MIB;
 
@@ -723,8 +727,9 @@ sub TIEHASH {
 sub FETCH {
     my $this = shift;
     my $key = shift;
+
     if (!defined $this->{$key}) {
-        tie %{$this->{$key}}, SNMP::MIB::NODE, $key;
+	tie(%{$this->{$key}}, SNMP::MIB::NODE, $key) or return undef;
     }
     $this->{$key};
 }
@@ -799,11 +804,11 @@ package SNMP::MIB::SAVE_DESCR;
 
 sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }
 
-sub FETCH { $$_[0]; }
+sub FETCH { ${$_[0]}; }
 
-sub STORE { SNMP::_set_save_descriptions($_[1]); $$_[0] = $_[1]; }
+sub STORE { SNMP::_set_save_descriptions($_[1]); ${$_[0]} = $_[1]; }
 
-sub DELETE { SNMP::_set_save_descriptions(0); $$_[0] = 0; }
+sub DELETE { SNMP::_set_save_descriptions(0); ${$_[0]} = 0; }
 
 package SNMP;
 END{SNMP::_sock_cleanup() if defined &SNMP::_sock_cleanup;}

@@ -10,7 +10,7 @@ BEGIN {
 }
 
 use SNMP;
-my $cat = ($ =~ /win32/i ? 'type' : 'cat');
+my $cat = ($^O =~ /win32/i ? 'type' : 'cat');
 my($host,$comm);
 if (-f 'host') {
    ($host, $comm) = split(' ',`$cat host`);

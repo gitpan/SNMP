@@ -34,7 +34,7 @@ The most recent release of the UCD SNMP Libray can be found at:
 ftp://ftp.ece.ucdavis.edu/pub/snmp/ucd-snmp.tar.gz
 
 The most recent release of the Perl5/SNMP module can be found at:
-ftp:/ftp.wellfleet.com/netman/snmp/perl5/SNMP.tar.gz
+ftp://ftp.wellfleet.com/netman/snmp/perl5/SNMP.tar.gz
 (as well as the usual perl archives, CPAN)
 
 Supported Platforms:
@@ -46,17 +46,14 @@ Supported Platforms:
 
 Release Notes:
 
-version 1.8 is intended to compile w/ ucd-snmp-3.5 (1.8a1 was
+version 1.8 is known to interoperate w/ ucd-snmp-3.5.2 (1.8a1 was
 targetted at ucd-snmp-3.4). Compatibility with later versions of
 ucd-snmp is not guaranteed due to the dynamic nature of free software
-development :). As of 1.8a2, 'make test' will fail session test 9 when
-tested with the ucd-snmp agent due to a bug in the agent in which
-'set's to read-only attributes appear to succeed. This 'make test'
-failure can be safely ignored.
+development :).
 
 Installation:
 
-build and install ucd-snmp-3.5 
+build and install ucd-snmp-3.5.2
 
 note: you should ensure that any previous ucd-snmp or cmu snmp
 installation is located so that the wrong libsnmp or headers are not
@@ -73,12 +70,12 @@ the snmpd.conf file with read-write access for 'private'
 
 Operational Description:
 
-The basic operations offered by the SNMP module are provided through
-an object oriented interface for modularity and ease of use. The
-primary class is SNMP::Session which encapsulates the persistent
-aspects of a connection between the management application and the
-managed agent. Internally the class is implemented as a blessed hash
-reference. This class supplies 'get', 'getnext', 'set', 'fget', and
+The basic operations of the SNMP protocol are provided by this module 
+through an object oriented interface for modularity and ease of use. 
+The primary class is SNMP::Session which encapsulates the persistent 
+aspects of a connection between the management application and the 
+managed agent. Internally the class is implemented as a blessed hash 
+reference. This class supplies 'get', 'getnext', 'set', 'fget', and 
 'fgetnext' method calls. The methods take a variety of input argument
 formats and support both syncronous and asyncronous operation through
 a polymorphic API (i.e., method behaviour varies dependent on args
@@ -147,9 +144,9 @@ methods:
                    passed in as a hash list (similar to new(<fields>))
                    (WARNING! not fully implemented)
  get(<vars>[,<callback>]) 
-                 - do SNMP GET, multiple <vars> formats accepted,
+                 - do SNMP GET, multiple <vars> formats accepted.
                    for syncronous operation <vars> will be updated
-                   with value(s) and type(s) and will return
+                   with value(s) and type(s) and will also return
                    retrieved value(s). If <callback> supplied method
                    will operate asyncronously
  fget(<vars>[,<callback>])    
@@ -168,7 +165,7 @@ methods:
                    the handlers specified in $sess->{VarFormats} and
                    $sess->{TypeFormats}
  set(<vars>[,<callback>])     
-                 - do SNMP SET, multiple <vars> formats accepted,
+                 - do SNMP SET, multiple <vars> formats accepted.
                    the value field in all <vars> formats must be in a canonical
                    format (i.e., well known format) to ensure unambiguous
                    translation to SNMP MIB data value (see discussion of
@@ -178,7 +175,7 @@ methods:
  getbulk(<non-repeaters>, <max-repeaters>, <vars>)
                  - * Not Implemented *
 
-SNMP::TrapSession - supports all aplicable fields from SNMP::Session
+SNMP::TrapSession - supports all applicable fields from SNMP::Session
                     (see above)
 methods:
  new(<fields>)   - Constructs a new SNMP::TrapSession object. The fields are
@@ -273,8 +270,9 @@ Acceptable callback formats:
     [ "method", $obj, $arg1, ... ]
 
 callback will be called when response is received or timeout
-occurs. the last argument passed to callback will be the
-SNMP::VarList.
+occurs. the last argument passed to callback will be a
+SNMP::VarList reference. In case of timeout the last argument 
+will be undef
 
 SNMP package variables and functions:
 
@@ -338,7 +336,7 @@ SNMP package variables and functions:
         parent        - parent node
         children      - array reference of children nodes
         nextNode      - next lexico node (BUG!does not return in lexico order)
-        type          - returns simple type (see getType for values)
+        type          - returns application type (see getType for values)
         access        - returns ACCESS (ReadOnly, ReadWrite, WriteOnly, 
                         NoAccess, Notify, Create)
         status        - returns STATUS (Mandatory, Optional, Obsolete, 
@@ -413,11 +411,13 @@ SNMP package variables and functions:
                          $val = SNMP::mapEnum('ipForwarding', 'forwarding');
                          $val = SNMP::mapEnum('ipForwarding', 1);
 
- &SNMP::MainLoop() - to be used with async SNMP::Session
+ &SNMP::MainLoop([<timeout>, [<callback>]])  
+                   - to be used with async SNMP::Session
                      calls. MainLoop must be called after initial async calls
                      so return packets from the agent will not be processed. 
-                     This function enters an infinite loop so program must
-                     be exited in a callback or externally interupted.
+                     If no args suplied this function enters an infinite loop
+                     so program must be exited in a callback or externally 
+                     interupted. If 
 
 Exported SNMP utility functions 
 &snmp_get() - takes args of SNMP::Session::new followed by those of 
@@ -502,10 +502,9 @@ History:
 
 Bugs fixed and changes in 1.8
 
-1) added async API (async api should be considered late alpha -
+1) added async API (async api should be considered beta -
    potential changes are most likely in the event loop integration
-   area - would like to integrate with Event.pm - also mechanism for
-   indicating timeout to callback is required)
+   area - would like to integrate with Event.pm)
 
 2) added trap generation API (implemented v1 traps only for now)
 
