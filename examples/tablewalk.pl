@@ -1,13 +1,19 @@
-$session = new SNMP::Session ( DestHost => $host );
+# snmpwalk of a single table
+# getnext of 3 columns from ipAddrEntry table
+# stop after last row in table
 
-#test snmpwalk of a single table
-print "table walk test(getnext)\nipAddrEntry Table:\n";
-for ($vars=new SNMP::VarList([ipAdEntAddr],[ipAdEntIfIndex],[ipAdEntNetMask]),
-     @vals = $session->getnext($vars);
-     $vars->[0]->tag =~ /ipAdEntAddr/ and # still in table
-     not $session->{ErrorStr}; # and not end of mib or other error
-     @vals = $session->getnext($vars)) {
+use SNMP 1.8;
 
-     print "   $vals[0]/$vals[2] ($vals[1])\n";
+my $host = shift || localhost;
+my $comm = shift || public;
 
+my $sess = new SNMP::Session ( DestHost => $host, Community => $comm );
+
+my $vars = new SNMP::VarList([ipAdEntAddr],[ipAdEntIfIndex],[ipAdEntNetMask]);
+
+for (@vals = $sess->getnext($vars);
+     $vars->[0]->tag =~ /ipAdEntAddr/       # still in table
+     and not $sess->{ErrorStr};          # and not end of mib or other error
+     @vals = $sess->getnext($vars)) {
+     print "   ($vals[1]) $vals[0]/$vals[2]\n";
 }

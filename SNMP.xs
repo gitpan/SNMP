@@ -28,6 +28,8 @@
 #define SOCK_STARTUP winsock_startup()
 #define SOCK_CLEANUP winsock_cleanup()
 #define DLL_IMPORT   __declspec( dllimport )
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
 #else
 #define SOCK_STARTUP
 #define SOCK_CLEANUP
@@ -771,9 +773,6 @@ void *cb_data;
   AV *varlist;
   SV *varbind_ref;
   AV *varbind;
-  I32 varlist_len;
-  I32 varlist_ind;
-  I32 varbind_len;
   struct variable_list *vars;
   struct tree *tp;
   int len;
@@ -803,9 +802,7 @@ void *cb_data;
       varlist = newAV();
       varlist_ref = newRV_noinc((SV*)varlist);
       sv_bless(varlist_ref, gv_stashpv("SNMP::VarList",0));
-      for(vars = (pdu ? pdu->variables : NULL), varlist_ind = 0; 
-          vars && (varlist_ind <= varlist_len); 
-          vars = vars->next_variable, varlist_ind++) {
+      for(vars = (pdu?pdu->variables:NULL); vars; vars = vars->next_variable) {
          varbind = newAV();
          varbind_ref = newRV_noinc((SV*)varbind);
          sv_bless(varbind_ref, gv_stashpv("SNMP::Varbind",0));
@@ -834,12 +831,11 @@ void *cb_data;
       sv_2mortal(cb);
       __push_cb_args(&cb, sv_2mortal(varlist_ref));
       __call_callback(cb, G_DISCARD);
-
       FREETMPS;
       LEAVE;
       break;
     }
-    default:
+    default:;
     }
     break;
 
@@ -848,7 +844,7 @@ void *cb_data;
     break;
 
 
-  default:
+  default:;
 
   }
   return 1;
@@ -2097,10 +2093,10 @@ snmp_main_loop()
                  if (errno == EINTR) {
                     continue;
                  } else {
-                    snmp_set_detail(strerror(errno));
-                    snmp_errno = SNMPERR_GENERR;
+                    /* snmp_set_detail(strerror(errno)); */
+                    /* snmp_errno = SNMPERR_GENERR; */
                  }
-              default:
+              default:;
            }
         }
 	}
@@ -2182,7 +2178,7 @@ snmp_mib_node_FETCH(tp_ref, key)
 	      case 'm': /* moduleID */
                  if (strncmp("moduleID", key, strlen(key))) break;
                  mp = find_module(tp->modid);
-                 if (mp != 0) sv_setpv(ST(0), mp->name);
+                 if (mp) sv_setpv(ST(0), mp->name);
                  break;
 	      case 'p': /* parent */
                  if (strncmp("parent", key, strlen(key))) break;

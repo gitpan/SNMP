@@ -1,19 +1,17 @@
-use SNMP 1.6;
+# snmpwalk of entire MIB
+# stop on error at end of MIB
 
-$host = shift;
-unless ($host) {
-  $| = 1;  print "enter SNMP host address: "; $| = 0;
-  chomp($host = <STDIN>);
-}
+use SNMP 1.8;
 
-$sess = new SNMP::Session(DestHost => $host);
+my $host = shift || localhost;
+my $comm = shift || public;
+
+$sess = new SNMP::Session(DestHost => $host, Community => $comm);
 
 $var = new SNMP::Varbind([]);
 
 do {
   $val = $sess->getnext($var);
-  print "$var->[$SNMP::Varbind::tag_f].$var->[$SNMP::Varbind::iid_f] = $var->[$SNMP::Varbind::val_f] ($sess->{ErrorStr}:$sess->{ErrorNum})\n";
-  open(PS,"ps -u$$|") || die;
-  $size = (split(' ',(<PS>)[1]))[4];
-  print "size = $size\n";
+  print "$var->[$SNMP::Varbind::tag_f].$var->[$SNMP::Varbind::iid_f] = ",
+        "$var->[$SNMP::Varbind::val_f]\n";
 } until ($sess->{ErrorStr});
