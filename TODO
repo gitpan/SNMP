@@ -1,15 +1,13 @@
-implement an asynchronous interface so multiple requests can be sent out
-and responses can be handled with a call-back. probably should make an
+Improve asyncronous interface. probably should make an
 SNMP::snmp_callback which can be installed with Tk's fileevent or a
-general select loop (and/or EventDrivenServer) This would really be
-easier and more reliable/compatible if/when event handling is moved to
-the perl core.
-
-finish and document the SNMP::MIB mib tree access API
+general select loop (and/or Event module) This would really be easier
+and more reliable/compatible if/when event handling is moved to the
+perl core. allow SNMP::MainLoop to handle timer based polling.
 
 look for *Not Implemeted* and implement :)
 
-allow unloading and reinitialization of parsed MIB (change to ucd-snmp?)
+allow unloading and reinitialization of parsed MIB - write access to
+mib tree (change to ucd-snmp?)
 
 allow MIB use on a per Session basis (ie. dependent on agent type and
 version, loaded mib might be different (yes I know properly designed
@@ -20,9 +18,7 @@ I think the error handling is fixed now - but it could use some
 validation/going over. See that informative strings are returned and the
 the error number is useful in all cases.
 
-implement more v2-isms. and v3 isms?
-
-add trap generation/handling
+implement v2 traps and v3 sessions? (ucd-snmp changes required)
 
 ensure module does not complain with -w.
 

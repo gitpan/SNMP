@@ -10,10 +10,10 @@ BEGIN {
 }
 
 use SNMP;
-
+my $cat = ($ =~ /win32/i ? 'type' : 'cat');
 my($host,$comm);
 if (-f 'host') {
-   ($host, $comm) = split(' ',`cat host`);
+   ($host, $comm) = split(' ',`$cat host`);
 }
 $host ||= 'localhost';
 $comm ||= 'private';
@@ -86,7 +86,7 @@ printf "%s %d\n", ($s1->{ErrorInd} == 0) ? "ok" :"not ok", $n++;
 # Try to change a read-only value
 $s1->set('sysUpTime.0', 0);
 printf "%s %d\n", ($s1->{ErrorInd} == 1) ? "ok" :"not ok", $n++;
-print STDERR $s1->get('sysUpTime.0'),"\n";
+# WARNING! this test was failing due to bug in ucd-snmp-3.5 agent
 ######################################################################
 # getnext tests
 ######################################################################

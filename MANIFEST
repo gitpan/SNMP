@@ -15,3 +15,4 @@ t/translate.t
 examples/mibwalk.pl
 examples/tablewalk.pl
 examples/testleak.pl
+examples/async.pl

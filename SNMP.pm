@@ -1,5 +1,5 @@
 package SNMP;
-$VERSION = '1.8a1';   # current release version number
+$VERSION = '1.8';   # current release version number
 
 require Exporter;
 require DynaLoader;
@@ -29,7 +29,12 @@ require AutoLoader;
 	SNMP_DEFAULT_TIMEOUT
 	SNMP_DEFAULT_VERSION
 	TIMED_OUT
+	snmp_get
+        snmp_getnext
+        snmp_set
+        snmp_trap
 );
+
 sub AUTOLOAD {
     # This AUTOLOAD is used to 'autoload' constants from the constant()
     # XS function.  If a constant is not found then control is passed
@@ -57,8 +62,9 @@ sub AUTOLOAD {
 bootstrap SNMP;
 
 # Preloaded methods go here.
+
+# Package variables
 $auto_init_mib = 1; # enable automatic MIB loading at session creation time
-$verbose = 0; # non-zero for debugging and status output
 $use_long_names = 0; # non-zero to prefer longer mib textual identifiers rather
                      # than just leaf indentifiers (see translateObj)
                      # may also be set on a per session basis
@@ -70,11 +76,15 @@ $use_enums = 0; # non-zero to return integers as enums and allow sets
                 # using enums where appropriate - integer data will
                 # still be accepted for set operations
                 # may also be set on a per session basis
-%MIB = ();     # tied hash to library internal mib tree structure from
-                # parsed mib
+%MIB = ();      # tied hash to library internal mib tree structure from
+                # parsed mib (seepackage SNMP::MIB for 
+$verbose = 0; # non-zero for debugging and status output from SNMP module
+$debugging = 0; # non-zero to globally enable libsnmp do_debugging output
 $save_descriptions = 0; #tied scalar to control saving descriptions during
                # mib parsing - must be set prior to mib loading
 
+tie $SNMP::debugging, SNMP::DEBUGGING;
+tie $SNMP::dump_packet, SNMP::DUMP_PACKET;
 tie %SNMP::MIB, SNMP::MIB;
 tie $SNMP::save_descriptions, SNMP::MIB::SAVE_DESCR;
 
@@ -134,9 +144,9 @@ sub translateObj {
    my $long_names = shift || $SNMP::use_long_names;
    my $res;
    if ($obj =~ /^\.?(\d+\.)*\d+$/) {
-      $res = SNMP::_translate_obj($obj,1,$long_names);
+      $res = SNMP::_translate_obj($obj,1,$long_names,$SNMP::auto_init_mib);
    } elsif ($obj =~ /(\w+)+(\.\d+)*$/) {
-      $res = SNMP::_translate_obj($1,0,$long_names);
+      $res = SNMP::_translate_obj($1,0,$long_names,$SNMP::auto_init_mib);
       $res .= $2 if defined $2;
    }
 
@@ -156,21 +166,80 @@ sub mapEnum {
 
   # SNMP::_map_enum($varbind->[$SNMP::Varbind::tag_f]);
 }
+%session_params = (DestHost => 1,
+		   Community => 1,
+		   Version => 1,
+		   Timeout => 1,
+		   Retries => 1,
+		   RemotePort => 1);
+
+sub strip_session_params {
+    my @params;
+    my @args;
+    my $param;
+    while ($param = shift) {
+	push(@params,$param, shift), next
+	    if $session_params{$param};
+	push(@args,$param);
+    }
+    @_ = @args;
+    @params;
+}
+
 
 sub snmp_get {
+# procedural form of 'get' method. sometimes quicker to code 
+# but is less efficient since the Session is created and destroyed
+# with each call. Takes all the parameters of both SNMP::Session::new and
+# SNMP::Session::get (*NOTE*: this api does not support async callbacks)
 
+    my @sess_params = &strip_session_params;
+    my $sess = new SNMP::Session(@sess_params);
+
+    $sess->get(@_);
 }
 
 sub snmp_getnext {
 
+# procedural form of 'getnext' method. sometimes quicker to code 
+# but is less efficient since the Session is created and destroyed
+# with each call. Takes all the parameters of both SNMP::Session::new and
+# SNMP::Session::getnext (*NOTE*: this api does not support async callbacks)
+
+    my @sess_params = &strip_session_params;
+    my $sess = new SNMP::Session(@sess_params);
+
+    $sess->getnext(@_);
 }
 
 sub snmp_set {
+# procedural form of 'set' method. sometimes quicker to code 
+# but is less efficient since the Session is created and destroyed
+# with each call. Takes all the parameters of both SNMP::Session::new and
+# SNMP::Session::set (*NOTE*: this api does not support async callbacks)
+
+    my @sess_params = &strip_session_params;
+    my $sess = new SNMP::Session(@sess_params);
+
+    $sess->set(@_);
 
 }
 
 sub snmp_trap {
+# procedural form of 'trap' method. sometimes quicker to code 
+# but is less efficient since the Session is created and destroyed
+# with each call. Takes all the parameters of both SNMP::TrapSession::new and
+# SNMP::TrapSession::trap
 
+    my @sess_params = &strip_session_params;
+    my $sess = new SNMP::TrapSession(@sess_params);
+
+    $sess->trap(@_);
+
+}
+
+sub MainLoop {
+  SNMP::_main_loop();
 }
 
 package SNMP::Session;
@@ -300,16 +369,16 @@ sub set {
      my $val = shift;
      $varbind_list_ref = [[$tag, $iid, $val]];
    }
-   # BUG --- Use of uninitialized value w/ no agent present --- BUG
-   $res = SNMP::_set($this, $varbind_list_ref);
+   my $cb = shift;
 
+   $res = SNMP::_set($this, $varbind_list_ref, $cb);
+   # BUG --- Use of uninitialized value w/ no agent present --- BUG
 }
 
 sub get {
    my $this = shift;
    my $vars = shift;
    my ($varbind_list_ref, @res);
-
 
    if (ref($vars) =~ /SNMP::VarList/) {
      $varbind_list_ref = $vars;
@@ -323,7 +392,9 @@ sub get {
      $varbind_list_ref = [[$tag, $iid]];
    }
 
-   @res = SNMP::_get($this, $this->{RetryNoSuch}, $varbind_list_ref);
+   my $cb = shift;
+
+   @res = SNMP::_get($this, $this->{RetryNoSuch}, $varbind_list_ref, $cb);
 
    return(wantarray() ? @res : $res[0]);
 }
@@ -346,13 +417,15 @@ sub fget {
      $varbind_list_ref = [[$tag, $iid]];
    }
 
-   @res = SNMP::_get($this, $this->{RetryNoSuch}, $varbind_list_ref);
+   my $cb = shift;
+
+   SNMP::_get($this, $this->{RetryNoSuch}, $varbind_list_ref, $cb);
 
    foreach $varbind (@$varbind_list_ref) {
      if ($sub = $this->{VarFormats}{$varbind->[$SNMP::Varbind::tag_f]}) {
-       $varbind->[$SNMP::Varbind::val_f] = &$sub($varbind);
+       push(@res, $varbind->[$SNMP::Varbind::val_f] = &$sub($varbind));
      } elsif ($sub = $this->{TypeFormats}{$varbind->[$SNMP::Varbind::type_f]}){
-       $varbind->[$SNMP::Varbind::val_f] = &$sub($varbind);
+       push(@res, $varbind->[$SNMP::Varbind::val_f] = &$sub($varbind));
      }
    }
 
@@ -376,7 +449,127 @@ sub getnext {
      $varbind_list_ref = [[$tag, $iid]];
    }
 
-   @res = SNMP::_getnext($this, $varbind_list_ref);
+   my $cb = shift;
+
+   @res = SNMP::_getnext($this, $varbind_list_ref, $cb);
+
+   return(wantarray() ? @res : $res[0]);
+}
+
+package SNMP::TrapSession;
+
+sub new {
+   my $type = shift;
+   my $this = {};
+   my ($name, $aliases, $host_type, $len, $thisaddr);
+
+   %$this = @_;
+
+   $this->{ErrorStr} = ''; # if methods return undef check for expln.
+   $this->{ErrorNum} = 0;  # contains SNMP error return
+
+   # v1 or v2, defaults to v1
+   $this->{Version} ||= 1;
+
+   # allow override of remote SNMP trap port
+   $this->{RemotePort} ||= 162;
+
+   # destination host defaults to localhost
+   $this->{DestHost} ||= 'localhost';
+
+   # community defaults to public
+   $this->{Community} ||= 'public';
+
+   # number of retries before giving up, defaults to SNMP_DEFAULT_RETRIES
+   $this->{Retries} = SNMP::SNMP_DEFAULT_RETRIES() unless defined($this->{Retries});
+
+   # timeout before retry, defaults to SNMP_DEFAULT_TIMEOUT
+   $this->{Timeout} = SNMP::SNMP_DEFAULT_TIMEOUT() unless defined($this->{Timeout});
+
+   # convert to dotted ip addr if needed
+   if ($this->{DestHost} =~ /\d+\.\d+\.\d+\.\d+/) {
+     $this->{DestAddr} = $this->{DestHost};
+   } else {
+     if (($name, $aliases, $host_type, $len, $thisaddr) =
+	 gethostbyname($this->{DestHost})) {
+	 $this->{DestAddr} = join('.', unpack("C4", $thisaddr));
+     } else {
+	 warn("unable to resolve destination address($this->{DestHost}!")
+	     if $SNMP::verbose;
+	 return undef;
+     }
+   }
+
+   $this->{SessPtr} = SNMP::_new_session($this->{Version},
+					 $this->{Community},
+					 $this->{DestAddr},
+					 $this->{RemotePort},
+					 $this->{Retries},
+					 $this->{Timeout},
+					);
+
+   return undef unless $this->{SessPtr};
+
+   SNMP::initMib() if $SNMP::auto_init_mib; # ensures that *some* mib is loaded
+
+   $this->{UseLongNames} ||= $SNMP::use_long_names;
+   $this->{UseSprintValue} ||= $SNMP::use_sprint_value;
+   $this->{UseEnums} ||= $SNMP::use_enums;
+
+   bless $this;
+}
+
+%trap_type = (coldStart => 0, warmStart => 1, linkDown => 2, linkUp => 3,
+	      authFailure => 4, egpNeighborLoss => 5, specific => 6 );
+sub trap {
+# (v1) enterprise, agent, generic, specific, uptime, <vars>
+# $sess->trap(enterprise=>'.1.3.6.1.4.1.2021', # or 'ucdavis' [default]
+#             agent => '127.0.0.1', # or 'localhost',[default 1st intf on host]
+#             generic => specific,  # can be omitted if 'specific' supplied
+#             specific => 5,        # can be omitted if 'generic' supplied
+#             uptime => 1234,       # default to localhost uptime (0 on win32)
+#             [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
+#                                                          # always last
+# (v2) srcParty, dstParty, oid, uptime, <vars>
+# $sess->trap(srcParty => party1, 
+#             dstParty => party2,
+#             oid => 'snmpRisingAlarm',
+#             uptime => 1234, 
+#             [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
+#                                                          # always last
+   my $this = shift;
+   my $vars = pop if ref($_[$#_]); # last arg may be varbind or varlist
+   my %param = @_;
+   my ($varbind_list_ref, @res);
+
+   if (ref($vars) =~ /SNMP::VarList/) {
+     $varbind_list_ref = $vars;
+   } elsif (ref($vars) =~ /SNMP::Varbind/) {
+     $varbind_list_ref = [$vars];
+   } elsif (ref($vars) =~ /ARRAY/) {
+     $varbind_list_ref = [$vars];
+     $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
+   }
+
+   if ($this->{Version} == 1) {
+       my $enterprise = $param{enterprise} || 'ucdavis';
+       $enterprise = SNMP::translateObj($enterprise) 
+	   unless $enterprise =~ /^[\.\d]+$/;
+       my $agent = $param{agent} || '';
+       my $generic = $param{generic} || 'specific';
+       $generic = $trap_type{$generic} || $generic;
+       my $uptime = $param{uptime} || SNMP::_sys_uptime();
+       my $specific = $param{specific} || 0;
+       @res = SNMP::_trapV1($this, $enterprise, $agent, $generic, $specific, 
+			  $uptime, $varbind_list_ref);
+   } else {
+       my $dstParty = $param{dstParty};
+       my $srcParty = $param{srcParty};
+       my $oid = $param{oid};
+       my $uptime = $param{uptime};
+       @res = SNMP::_trapV2($this, $dstParty, $srcParty, $oid, 
+			  $uptime, $varbind_list_ref);
+   }
 
    return(wantarray() ? @res : $res[0]);
 }
@@ -412,6 +605,10 @@ sub type {
   $_[0]->[$type_f];
 }
 
+#sub DESTROY {
+#    print "SNMP::Varbind::DESTROY($_[0])\n";
+#}
+
 package SNMP::VarList;
 
 sub new {
@@ -425,6 +622,34 @@ sub new {
 
    bless $this;
 }
+
+#sub DESTROY {
+#    print "SNMP::VarList::DESTROY($_[0])\n";
+#}
+
+package SNMP::DEBUGGING;
+
+sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }
+
+sub FETCH { $$_[0]; }
+
+sub STORE { 
+  SNMP::_set_debugging($_[1]); 
+  SNMP::_dump_packet($_[1]>1); 
+  $$_[0] = $_[1]; 
+}
+
+sub DELETE { SNMP::_set_debugging(0); SNMP::_dump_packet(0); $$_[0] = 0; }
+
+package SNMP::DUMP_PACKET;
+
+sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }
+
+sub FETCH { $$_[0]; }
+
+sub STORE { SNMP::_dump_packet($_[1]); $$_[0] = $_[1]; }
+
+sub DELETE { SNMP::_dump_packet(0); $$_[0] = 0; }
 
 package SNMP::MIB;
 
@@ -461,19 +686,24 @@ package SNMP::MIB::NODE;
 my %node_elements = 
     (
      objectID => 0, # dotted decimal fully qualified OID
-     label => 0,
-     subID => 0,
-     moduleID => 0,
+     label => 0,    # leaf textual identifier (e.g., 'sysDescr')
+     subID => 0,    # leaf numeric OID component of objectID (e.g., '1')
+     moduleID => 0, # textual identifier for module (e.g., 'RFC1213-MIB')
      parent => 0,   # parent node
-     children => 0, # array ref child nodes
-     nextNode => 0,     # next lexico node
-     type => 0,
-     access => 0,
-     status => 0,
-     units => 0,
-     hint => 0,
-     enums => 0,    # hash ref {tag => num, ...}
-     description => 0,
+     children => 0, # array reference of children nodes
+     nextNode => 0, # next lexico node (BUG! does not return in lexico order)
+     type => 0,     # returns simple type (see getType for values)
+     access => 0,   # returns ACCESS (ReadOnly, ReadWrite, WriteOnly, 
+                    # NoAccess, Notify, Create)
+     status => 0,   # returns STATUS (Mandatory, Optional, Obsolete, 
+                    # Deprecated)
+     syntax => 0,   # returns 'textualConvention' if defined else 'type'
+     textualConvention => 0, # returns TEXTUAL-CONVENTION
+     units => 0,    # returns UNITS
+     hint => 0,     # returns HINT
+     enums => 0,    # returns hash ref {tag => num, ...}
+     description => 0, # returns DESCRIPTION ($SNMP::save_descriptions must
+                    # be set prior to MIB initialization/parsing
     );
 
 # sub TIEHASH - implemented in SNMP.xs
@@ -496,7 +726,8 @@ sub CLEAR {
 }
 
 sub DESTROY {
-    print "SNMP::MIB::NODE - I'm destroyed\n$_[0]->{label}($_[0])\n";
+    warn "DESTROY(@_): write access to MIB node not implemented\n";
+    # print "SNMP::MIB::NODE::DESTROY : $_[0]->{label} ($_[0])\n";
 }
 package SNMP::MIB::SAVE_DESCR;
 

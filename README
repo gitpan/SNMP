@@ -1,4 +1,4 @@
-		     Perl5 SNMP Extension Module
+		     Perl5 SNMP Extension Module v1.8
 		       for the UCD SNMP Library
 		G.S. Marzot (gmarzot@baynetworks.com)
 
@@ -6,26 +6,26 @@ Contents:
    Introduction:
    Availability:
    Supported Platforms:
+   Release Notes:
    Installation:
-   patch
    Operational Description:
    Trouble Shooting:
    Acknowledments:
    History:
 
-
 Introduction:
 
 This is a Perl5 extension module which provides an interface to the
-UCD SNMP client toolkit. The UCD SNMP Library is based on version
-2.1.2.1 of the CMU SNMP Library and has incorporated many bugfixes and
-enhancements. For information on the UCD SNMP Library see the
-documentation provided with the UCD SNMP distribution.
+UCD SNMP client toolkit. The UCD SNMP Library was originally based on
+version 2.1.2.1 of the CMU SNMP Library but has incorporated many
+bugfixes and enhancements. For information on the UCD SNMP Library see
+the documentation provided with the UCD SNMP distribution or the
+ucd-snmp project web page: http://www.ece.ucdavis.edu/ucd-snmp
 
 (NOTE: In previous releases this module was compatible with both the
 UCD and CMU SNMP libraries. Starting with Perl5/SNMP-1.7 this module
-will only work with the UCD SNMP Library 3.3.1 or later due to
-dependence on new features)
+will *only* work with the UCD SNMP Library due to dependence on new
+features)
 
 Availability:
 
@@ -43,32 +43,45 @@ Supported Platforms:
 	Many other UNIX variants
 	Win95/NT   ***NEW***
 
+Release Notes:
+
+version 1.8a2 (and 1.8 release) is intended to compile w/ ucd-snmp-3.5
+(1.8a1 was targetted at ucd-snmp-3.4). Compatibility with later
+versions of ucd-snmp is not guaranteed due to the dynamic nature of
+free software development :). As of 1.8a2 make test may fail session
+test #9 due to a bug un the ucd-snmp agent which allows sets to
+read-only attributes to appear to succeed. This 'make test' failure
+can safely be ignored.
+
 Installation:
 
-build and install ucd-snmp-3.3.1 or later
+build and install ucd-snmp-3.5 
 
 note: you should ensure that any previous ucd-snmp installation is
-completely removed.
+completely removed and that any other libsnmp or headers are not used
+by mistake).
 
 perl Makefile.PL
 make
 make test
 make install
 
-note: for 'make test' to succeed you should ensure that an agent running 
-(e.g., /usr/local/sbin/snmpd) 
+note: 'make test' requires that an agent is running to which you have
+read/write access. For the ucd-snmp snmpd this may involve setting up
+the snmpd.conf file with read-write access for 'private'
 
 Operational Description:
 
-The basic operations offered by SNMP are provided through an object
-oriented interface for modularity and ease of use. The primary class
-is SNMP::Session which is implemented as a blessed hash
+The basic operations offered by the SNMP module are provided through
+an object oriented interface for modularity and ease of use. The
+primary class is SNMP::Session which encapsulates the persistent
+aspects of a connection between the management application and the
+managed agent. Internally the class is implemented as a blessed hash
 reference. This class supplies 'get', 'getnext', 'set', 'fget', and
-'fgetnext' method calls. All calls are currently blocking/synchronous
-(i.e., they must receive a response or timeout before control is
-returned to the caller - an asyncronous implementation is very high on
-the TODO list). The methods take a variety of input argument formats
-(see below).
+'fgetnext' method calls. The methods take a variety of input argument
+formats and support both syncronous and asyncronous operation through
+a polymorphic API (i.e., method behaviour varies dependent on args
+passed - see below).
 
 A description of the fields which can be specified when an
 SNMP::Session object is created follows:
@@ -108,7 +121,7 @@ public:
                sprint_value function. This will result in certain data types
                being returned in non-canonical format NOTE: values returned
                with this option set may not be appropriate for 'set' operations
-               (see discussion value formats in <vars> description section)
+               (see discussion of value formats in <vars> description section)
  UseEnums    - defaults to the value of SNMP::use_enums at time of session
                creation. set to non-zero to have integer return values
                converted to enumeration identifiers if possible, these values
@@ -127,23 +140,31 @@ methods:
                    (e.g., $session = new SNMP::Session(DestHost => 'foo',
                    Community => 'private');), returns an object reference
                    or undef in case of error.
- update(<fields>)- Updates the  SNMP::Session object with the values fields 
+ update(<fields>)- Updates the SNMP::Session object with the values fields 
                    passed in as a hash list (similar to new(<fields>))
- get(<vars>)     - do SNMP GET, multiple <vars> formats accepted,
-                   updates <vars> with value(s) and type(s), returns
-                   retrieved value(s)
- fget(<vars>)    - do SNMP GET like 'get' and format the values according
+                   (WARNING! not fully implemented)
+ get(<vars>[,<callback>]) 
+                 - do SNMP GET, multiple <vars> formats accepted,
+                   for syncronous operation <vars> will be updated
+                   with value(s) and type(s) and will return
+                   retrieved value(s), if <callback> supplied will operate
+                   asyncronously
+ fget(<vars>[,<callback>])    
+                 - do SNMP GET like 'get' and format the values according
                    the handlers specified in $sess->{VarFormats} and
                    $sess->{TypeFormats}
- getnext(<vars>) - do SNMP GETNEXT, multiple <vars> formats accepted,
+ getnext(<vars>[,<callback>]) 
+                 - do SNMP GETNEXT, multiple <vars> formats accepted,
                    returns retrieved value(s), <vars> passed as arguments are
                    updated to indicate next lexicographical <obj>,<iid>,<val>,
                    and <type> NOTE: simple string <vars>,(e.g., 'sysDescr.0')
                    form is not updated
- fgetnext(<vars>)- do SNMP GETNEXT like getnext and format the values according
+ fgetnext(<vars>[,<callback>])
+                 - do SNMP GETNEXT like getnext and format the values according
                    the handlers specified in $sess->{VarFormats} and
                    $sess->{TypeFormats}
- set(<vars>)     - do SNMP SET, multiple <vars> formats accepted,
+ set(<vars>[,<callback>])     
+                 - do SNMP SET, multiple <vars> formats accepted,
                    the value field in all <vars> formats must be in a canonical
                    format (i.e., well known format) to ensure unambiguous
                    translation to SNMP MIB data value (see discussion of
@@ -151,7 +172,27 @@ methods:
                    returns snmp_errno
  getbulk(<non-repeaters>, <max-repeaters>, <vars>)
                  - * Not Implemented *
- trap()          - * Not Implemented *
+
+SNMP::TrapSession - supports all aplicable fields from SNMP::Session
+                    (see above)
+methods:
+ trap(enterprise, agent, generic, specific, uptime, <vars>)
+    $sess->trap(enterprise=>'.1.3.6.1.4.1.2021', # or 'ucdavis' [default]
+                agent => '127.0.0.1', # or 'localhost',[dflt 1st intf on host]
+                generic => specific,  # can be omitted if 'specific' supplied
+                specific => 5,        # can be omitted if 'generic' supplied
+                uptime => 1234,       # dflt to localhost uptime (0 on win32)
+                [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
+                                                             # always last
+ or v2 format
+ trap(srcParty, dstParty, oid, uptime, <vars>)  - * Not Implemented *
+    $sess->trap(srcParty => party1, 
+                dstParty => party2,
+                oid => 'snmpRisingAlarm',
+                uptime => 1234, 
+                [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
+                                                             # always last
+
  
 Acceptable variable formats:
 <vars> may be one of the following forms:
@@ -210,9 +251,19 @@ Acceptable variable formats:
                    is passed as a second arg. NOTE: This argument form is
                    not updated in get[next] operations as are the other forms.
 
+Acceptable callback formats:
+<callback> may be one of the following forms:
+ 
+ without arguments:
+    \&subname
+    sub { ... }
+ or with arguments:
+    [ \&subname, $arg1, ... ]
+    [ sub { ... }, $arg1, ... ]
+
 SNMP package variables and functions:
 
- $SNMP::VERSION       - the current version specifier (e.g., 1.7)
+ $SNMP::VERSION       - the current version specifier (e.g., 1.8)
 
  $SNMP::auto_init_mib - default '1', set to 0 to disable automatic reading
                         of the MIB upon session creation. set to non-zero
@@ -238,6 +289,17 @@ SNMP package variables and functions:
                         allow sets using enums where appropriate. integer data
                         will still be accepted for set operations. can also be
                         set on a per session basis (see UseEnums)
+
+ $SNMP::save_descriptions - default '0',set non-zero to have mib parser save 
+                        attribute descriptions. must be set prior to mib 
+                        initialization
+
+ $SNMP::debugging     - default '0',set non-zero to return to set debugging
+                        out put level 1 => snmp_set_do_debugging(1), 2 =>
+                        level 1 plus snmp_set_dump_packet(1)
+
+ $SNMP::dump_packet   - default '0',set non-zero to independently set 
+                        snmp_set_dump_packet(1)
 
  &SNMP::setMib(<file>) - allows dynamic (re?)parsing of the mib and explicit
                         specification of mib file independent of enviroment
@@ -286,20 +348,43 @@ SNMP package variables and functions:
  &SNMP::mapEnum(<var>) - converts integer value to enumertion tag defined
                         in Mib *Not Implemented*
 
+
+ &SNMP::MainLoop() - to be used with async SNMP::Session
+                     calls. MainLoop must be called or return packets
+                     from the agent will not be processed. This
+                     function enters an infinite loop so program must
+                     be exited in a callback or exterally interupted.
+
+Exported SNMP untility functions 
+&snmp_get() - takes args of session followed by those of SNMP::Session::get
+
+&snmp_getnext() - takes args of session followed by those of 
+                  SNMP::Session::getnext
+
+&snmp_set() - takes args of session followed by those of SNMP::Session::set
+
+&snmp_trap() - takes args of session followed by those of 
+               SNMP::TrapSession::trap
+
+
 Trouble Shooting:
 
 If problems occur there are number areas to look at to narrow down the
 possibilities.
 
-The first step should be to test the UCD installation independent from
+The first step should be to test the UCD installation independently from
 the Perl5/SNMP interface. 
 
 Try running the apps from the UCD distribution. 
 
+Make sure your agent is running and properly configured with
+read-write access for the community you are using
+
 Ensure that your MIBs are installed and enviroment variables are set
 appropriately (see man mib_api)
 
-Be sure to remove old ucd-snmp installations
+Be sure to remove old ucd-snmp installations and ensure headers and
+libraries from old CMU installations are not being used by mistake
 
 If the problem occurs during compilation/linking check that the snmp
 library being linked is actually the UCD library (there have been name
@@ -308,7 +393,7 @@ conflicts with existing snmp libs).
 Also check that the header files are correct and up to date. 
 
 Sometimes compiling the UCD snmp library with
-'position-independent-code' enabled is required.
+'position-independent-code' enabled is required (HPUX specifically).
 
 if you cannot resolve the problem you can email me at
 gmarzot@baynetworks.com and/or ucd-snmp-coders@ece.ucdavis.edu.
@@ -344,6 +429,29 @@ bugs, comments, questions to gmarzot@baynetworks.com
 
 ------
 History:
+
+Bugs fixed and changes in 1.8
+
+1) added async API
+
+2) added trap generation API (implemented v1 traps only for now)
+
+3) added and exported non-OO utility API (snmp_get, snmp_set, etc.)
+
+4) added $SNMP::debugging to dynmically control libsnmp debugging output
+
+5) added $SNMP::save_descriptions to control libsnmp parsing/saving 
+   of MIB descriptions
+
+6) added $SNMP::dump_packet to control libsnmp packet dumping
+
+7) officially added(documented) tied %SNMP::MIB hash to allow access
+   to parsed MIB meta-data (new support for textualConvention and syntax)
+
+8) fixed bug related to AUTOLOAD recursion
+
+9) fixed bug with SNMP::use_enums so 'set' should now tolerate enums
+as input values
 
 Bugs fixed and changes in 1.7
 

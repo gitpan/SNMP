@@ -35,7 +35,6 @@
 #endif
 extern int Suffix;
 DLL_IMPORT extern struct tree *Mib;
-
 #include "asn1.h"
 #include "snmp_api.h"
 #include "snmp_client.h"
@@ -59,6 +58,7 @@ DLL_IMPORT extern struct tree *Mib;
 typedef struct snmp_session SnmpSession;
 typedef struct tree SnmpMibNode;
 
+static in_addr_t __parse_address _((char*));
 static int __is_numeric_oid _((char*));
 static int __is_leaf _((struct tree*));
 static int __translate_appl_type _((char*));
@@ -79,11 +79,35 @@ static void __add_var_val_str _((struct snmp_pdu *, oid *, int, char *,
                                  int, int));
 static int __send_sync_pdu _((struct snmp_session *, struct snmp_pdu *,
                               struct snmp_pdu **, int , SV *, SV *, SV *));
+static int __snmp_xs_cb __P((int, struct snmp_session *, int,
+                             struct snmp_pdu *, void *));
+static int __push_cb_args _((SV ** svp, SV * esv));
+static int __call_callback _((SV * sv, int flags));
 
 #define NON_LEAF_NAME 0x04
 #define USE_LONG_NAMES 0x02
 #define FAIL_ON_NULL_IID 0x01
 #define NO_FLAGS 0x00
+
+static in_addr_t __parse_address(address)
+char *address;
+{
+    in_addr_t addr;
+    struct sockaddr_in saddr;
+    struct hostent *hp;
+
+    if ((addr = inet_addr(address)) != -1)
+	return addr;
+    hp = gethostbyname(address);
+    if (hp == NULL){
+	fprintf(stderr, "unknown host: %s\n", address);
+	exit(1);
+    } else {
+	memcpy(&saddr.sin_addr, hp->h_addr, hp->h_length);
+	return saddr.sin_addr.s_addr;
+    }
+
+}
 
 static int __is_numeric_oid (oidstr)
 char* oidstr;
@@ -118,6 +142,8 @@ static int
 __translate_appl_type(typestr)
 char* typestr;
 {
+	if (typestr == NULL || *typestr == '\0') return TYPE_UNKNOWN;
+
 	if (!strncasecmp(typestr,"INTEGER",3))
             return(TYPE_INTEGER);
 	if (!strcasecmp(typestr,"COUNTER")) /* check it all in case counter64 */
@@ -572,6 +598,7 @@ __add_var_val_str(pdu, name, name_length, val, len, type)
     oid *name;
     int name_length;
     char * val;
+    int len;
     int type;
 {
     struct variable_list *vars;
@@ -726,6 +753,180 @@ retry:
    }
 
    return(status);
+}
+
+static int 
+__snmp_xs_cb (op, ss, reqid, pdu, cb_data)
+int op;
+struct snmp_session *ss;
+int reqid;
+struct snmp_pdu *pdu;
+void *cb_data;
+{  
+  SV *varlist_ref;
+  AV *varlist;
+  SV *varbind_ref;
+  AV *varbind;
+  I32 varlist_len;
+  I32 varlist_ind;
+  I32 varbind_len;
+  struct variable_list *vars;
+  struct tree *tp;
+  int len;
+  oid *oid_arr;
+  int oid_arr_len = MAX_NAME_LEN;
+  SV *tmp_sv;
+  int type;
+  char tmp_type_str[MAX_TYPE_NAME_LEN];
+  int status;
+  char str_buf[STR_BUF_SIZE];
+  char *label;
+  char *iid;
+  char *cp;
+  int getlabel_flag = FAIL_ON_NULL_IID;
+  int sprintval_flag = USE_BASIC;
+
+  SV* cb = (SV*)cb_data;
+
+  switch (op) {
+  case RECEIVED_MESSAGE:
+    switch (pdu->command) {
+    case SNMP_MSG_RESPONSE:
+      {
+      dSP;
+      ENTER;
+      SAVETMPS;
+      varlist = newAV();
+      varlist_ref = newRV_noinc((SV*)varlist);
+      sv_bless(varlist_ref, gv_stashpv("SNMP::VarList",0));
+      for(vars = (pdu ? pdu->variables : NULL), varlist_ind = 0; 
+          vars && (varlist_ind <= varlist_len); 
+          vars = vars->next_variable, varlist_ind++) {
+         varbind = newAV();
+         varbind_ref = newRV_noinc((SV*)varbind);
+         sv_bless(varbind_ref, gv_stashpv("SNMP::Varbind",0));
+         av_push(varlist, varbind_ref);
+         *str_buf = '.';
+         tp = get_symbol(vars->name,vars->name_length,
+                         get_tree_head(),str_buf+1);
+         if (__is_leaf(tp)) {
+            type = tp->type;
+         } else {
+            getlabel_flag |= NON_LEAF_NAME;
+            type = __translate_asn_type(vars->type);
+         }
+         __get_label_iid(str_buf,&label,&iid,getlabel_flag);
+         av_store(varbind, VARBIND_TAG_F,
+                  newSVpv(label, strlen(label)));
+         av_store(varbind, VARBIND_IID_F,
+                  newSVpv(iid, strlen(iid)));
+         __get_type_str(type, tmp_type_str);
+         tmp_sv = newSVpv(tmp_type_str, strlen(tmp_type_str));
+         av_store(varbind, VARBIND_TYPE_F, tmp_sv);
+         len = __sprint_value(str_buf, vars, tp, type, sprintval_flag);
+         tmp_sv = newSVpv((char*)str_buf, len);
+         av_store(varbind, VARBIND_VAL_F, tmp_sv);
+      }
+      sv_2mortal(cb);
+      __push_cb_args(&cb, sv_2mortal(varlist_ref));
+      __call_callback(cb, G_DISCARD);
+
+      FREETMPS;
+      LEAVE;
+      break;
+    }
+    default:
+    }
+    break;
+
+  case TIMED_OUT:
+
+    break;
+
+
+  default:
+
+  }
+  return 1;
+}
+
+static int
+__push_cb_args(svp,esv)
+SV **svp;
+SV *esv;
+{
+   SV *sv = *svp;
+   dSP;
+   if (SvTYPE(SvRV(sv)) != SVt_PVCV) sv = SvRV(sv);
+
+   PUSHMARK(sp);
+   if (SvTYPE(sv) == SVt_PVAV) {
+      AV *av = (AV *) sv;
+      int n = av_len(av) + 1;
+      SV **x = av_fetch(av, 0, 0);
+      if (x) {
+         int i = 1;
+         sv = *x;
+
+         for (i = 1; i < n; i++) {
+            x = av_fetch(av, i, 0);
+            if (x) { 
+               SV *arg = *x;
+               XPUSHs(sv_mortalcopy(arg));
+            } else {
+               XPUSHs(&sv_undef);
+            }
+         }
+      } else {
+         sv = &sv_undef;
+      }
+   }
+   if (esv) XPUSHs(sv_mortalcopy(esv));
+   *svp = sv;
+   PUTBACK;
+   return SUCCESS;
+}
+
+static int
+__call_callback(sv, flags)
+SV *sv;
+int flags;
+{
+ dSP;
+ I32 myframe = TOPMARK;
+ I32 count;
+ ENTER;
+ if (SvTYPE(sv) == SVt_PVCV)
+  {
+   count = perl_call_sv(sv, flags);
+  }
+ else if (SvROK(sv) && SvTYPE(SvRV(sv)) == SVt_PVCV)
+  {
+   count = perl_call_sv(SvRV(sv), flags);
+  }
+ else
+  {
+   SV **top = stack_base + myframe + 1;
+   SV *obj = *top;
+   if (SvPOK(sv) && SvROK(obj) && SvOBJECT(SvRV(obj)))
+    {
+     count = perl_call_method(SvPV(sv, na), flags);
+    }
+   else if (SvPOK(obj) && SvROK(sv) && SvOBJECT(SvRV(sv)))
+    {
+     /* We have obj method ...
+        Used to be used instead of LangMethodCall()
+      */
+     *top = sv;
+     count = perl_call_method(SvPV(obj, na), flags);
+    }
+   else
+    {
+     count = perl_call_sv(sv, flags);
+    }
+ }
+ LEAVE;
+ return count;
 }
 
 static int
@@ -889,6 +1090,12 @@ constant(name,arg)
 	char *		name
 	int		arg
 
+long
+snmp_sys_uptime()
+	CODE:
+	RETVAL = get_uptime();
+	OUTPUT:
+	RETVAL
 
 SnmpSession *
 snmp_new_session(version, community, peer, port, retries, timeout)
@@ -900,11 +1107,9 @@ snmp_new_session(version, community, peer, port, retries, timeout)
         int	timeout
 	CODE:
 	{
-	   SnmpSession session;
+	   SnmpSession session = {0};
 	   SnmpSession *ss = NULL;
            int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
-
-           memset(&session, 0, sizeof(SnmpSession));
 
 	   if (!strcmp(version, "1")) {
 		session.version = SNMP_VERSION_1;
@@ -1018,7 +1223,7 @@ snmp_read_mib(mib_file, force=0)
         if ((mib_file == NULL) || (*mib_file == '\0')) {
            if (Mib == NULL) {
               if (verbose) warn("initializing MIB\n");
-              init_mib();
+                 init_mib();
               if (Mib) {
                  if (verbose) warn("done\n");
               } else {
@@ -1067,9 +1272,10 @@ snmp_read_module(module)
 
 
 int
-snmp_set(sess_ref, varlist_ref)
+snmp_set(sess_ref, varlist_ref, perl_callback)
         SV *	sess_ref
         SV *	varlist_ref
+        SV *	perl_callback
 	PPCODE:
 	{
            AV *varlist;
@@ -1146,7 +1352,7 @@ snmp_set(sess_ref, varlist_ref)
                     }
                     if (type==TYPE_INTEGER && use_enums && tp && tp->enums) {
                       for(ep = tp->enums; ep; ep = ep->next) {
-                        if (varbind_type_f && 
+                        if (varbind_val_f && 
                             !strcmp(ep->label, SvPV(*varbind_val_f,na))) {
                           sv_setiv(*varbind_val_f, ep->value);
                           break;
@@ -1161,6 +1367,17 @@ snmp_set(sess_ref, varlist_ref)
                  } /* if var_ref is ok */
               } /* for all the vars */
 
+              if (SvTRUE(perl_callback)) {
+                 perl_callback = newSVsv(perl_callback);
+                 # it might be more efficient to pass the varbind_ref to
+                 # __snmp_xs_cb as part of perl_callback so it is not freed
+                 # and reconstructed for each call
+                 status = snmp_async_send(ss,pdu,__snmp_xs_cb,perl_callback);
+                 if (status == 0) snmp_free_pdu(pdu);
+                 XPUSHs(sv_2mortal(newSViv(status)));
+		 goto done;
+              }
+
 	      status = __send_sync_pdu(ss, pdu, &response,
 				       NO_RETRY_NOSUCH,
                                        *err_str_svp, *err_num_svp,
@@ -1174,15 +1391,17 @@ err:
               /* BUG!!! need to return an error value */
               XPUSHs(&sv_undef); /* no mem or bad args */
            }
+done:
 	Safefree(oid_arr);
         }
 
 
 void
-snmp_get(sess_ref, retry_nosuch, varlist_ref)
+snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
         SV *	sess_ref
         int	retry_nosuch
         SV *	varlist_ref
+        SV *	perl_callback
 	PPCODE:
 	{
            AV *varlist;
@@ -1255,6 +1474,17 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref)
                  } /* if var_ref is ok */
               } /* for all the vars */
 
+              if (SvTRUE(perl_callback)) {
+                 perl_callback = newSVsv(perl_callback);
+                 # it might be more efficient to pass the varbind_ref to
+                 # __snmp_xs_cb as part of perl_callback so it is not freed
+                 # and reconstructed for each call
+                 status = snmp_async_send(ss,pdu,__snmp_xs_cb,perl_callback);
+                 if (status == 0) snmp_free_pdu(pdu);
+                 XPUSHs(sv_2mortal(newSViv(status)));
+		 goto done;
+              }
+
 	      status = __send_sync_pdu(ss, pdu, &response,
 				       retry_nosuch,
                                        *err_str_svp,*err_num_svp,*err_ind_svp);
@@ -1302,13 +1532,15 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref)
            } else {
               XPUSHs(&sv_undef); /* no mem or bad args */
 	   }
+     done:
 	Safefree(oid_arr);
 	}
 
 int
-snmp_getnext(sess_ref, varlist_ref)
+snmp_getnext(sess_ref, varlist_ref, perl_callback)
         SV *	sess_ref
         SV *	varlist_ref
+        SV *	perl_callback
 	PPCODE:
 	{
            AV *varlist;
@@ -1379,51 +1611,56 @@ snmp_getnext(sess_ref, varlist_ref)
                  } /* if var_ref is ok */
               } /* for all the vars */
 
+              if (SvTRUE(perl_callback)) {
+                 perl_callback = newSVsv(perl_callback);
+                 # it might be more efficient to pass the varbind_ref to
+                 # __snmp_xs_cb as part of perl_callback so it is not freed
+                 # and reconstructed for each call
+                 status = snmp_async_send(ss,pdu,__snmp_xs_cb,perl_callback);
+                 if (status == 0) snmp_free_pdu(pdu);
+                 XPUSHs(sv_2mortal(newSViv(status)));
+		 goto done;
+              }
+
 	      status = __send_sync_pdu(ss, pdu, &response,
 				       NO_RETRY_NOSUCH,
                                        *err_str_svp, *err_num_svp,
 				       *err_ind_svp);
 
-              last_vars = (response ? response->variables : NULL);
-
-	      for(varlist_ind = 0; varlist_ind <= varlist_len; varlist_ind++) {
+              for(vars = (response?response->variables:NULL), varlist_ind = 0; 
+                  vars && (varlist_ind <= varlist_len); 
+                  vars = vars->next_variable, varlist_ind++) {
                  varbind_ref = av_fetch(varlist, varlist_ind, 0);
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
 
-                    vars = last_vars;
-
-		    if (vars) {
-                       *str_buf = '.';
-                       tp =
-                        get_symbol(vars->name,vars->name_length,
-                                   get_tree_head(),str_buf+1);
-                       if (__is_leaf(tp)) {
-                          type = tp->type;
-                       } else {
-                          getlabel_flag |= NON_LEAF_NAME;
-                          type = __translate_asn_type(vars->type);
-                       }
-                       __get_label_iid(str_buf,&label,&iid,getlabel_flag);
-                       av_store(varbind, VARBIND_TAG_F,
-                                 newSVpv(label, strlen(label)));
-                       av_store(varbind, VARBIND_IID_F,
-                                 newSVpv(iid, strlen(iid)));
-		       __get_type_str(type, tmp_type_str);
-                       tmp_sv = newSVpv(tmp_type_str, strlen(tmp_type_str));
-	      	       av_store(varbind, VARBIND_TYPE_F, tmp_sv);
-                       len=__sprint_value(str_buf,vars,tp,type,sprintval_flag);
-                       tmp_sv=newSVpv((char*)str_buf, len);
-                       av_store(varbind, VARBIND_VAL_F, tmp_sv);
-                       XPUSHs(sv_mortalcopy(tmp_sv));
+                    *str_buf = '.';
+                    tp = get_symbol(vars->name,vars->name_length,
+                                    get_tree_head(),str_buf+1);
+                    if (__is_leaf(tp)) {
+                       type = tp->type;
                     } else {
-err:
-                       av_store(varbind, VARBIND_IID_F, &sv_undef);
-                       av_store(varbind, VARBIND_VAL_F, &sv_undef);
-	      	       av_store(varbind, VARBIND_TYPE_F, &sv_undef);
-                       XPUSHs(&sv_undef);
+                       getlabel_flag |= NON_LEAF_NAME;
+                       type = __translate_asn_type(vars->type);
                     }
-                    if (last_vars) last_vars = last_vars->next_variable;
+                    __get_label_iid(str_buf,&label,&iid,getlabel_flag);
+                    av_store(varbind, VARBIND_TAG_F,
+                             newSVpv(label, strlen(label)));
+                    av_store(varbind, VARBIND_IID_F,
+                             newSVpv(iid, strlen(iid)));
+                    __get_type_str(type, tmp_type_str);
+                    tmp_sv = newSVpv(tmp_type_str, strlen(tmp_type_str));
+                    av_store(varbind, VARBIND_TYPE_F, tmp_sv);
+                    len = __sprint_value(str_buf,vars,tp,type,sprintval_flag);
+                    tmp_sv = newSVpv((char*)str_buf, len);
+                    av_store(varbind, VARBIND_VAL_F, tmp_sv);
+                    XPUSHs(sv_mortalcopy(tmp_sv));
+                 } else {
+err:
+                    av_store(varbind, VARBIND_IID_F, &sv_undef);
+                    av_store(varbind, VARBIND_VAL_F, &sv_undef);
+                    av_store(varbind, VARBIND_TYPE_F, &sv_undef);
+                    XPUSHs(&sv_undef);
                  }
               }
 
@@ -1432,8 +1669,254 @@ err:
            } else {
               XPUSHs(&sv_undef); /* no mem or bad args */
 	   }
+done:
 	Safefree(oid_arr);
 	}
+
+int
+snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
+        SV *	sess_ref
+        char *	enterprise
+        char *	agent
+        int	generic
+        int	specific
+        long	uptime
+        SV *	varlist_ref
+	PPCODE:
+	{
+           AV *varlist;
+           SV **varbind_ref;
+           SV **varbind_tag_f;
+           SV **varbind_iid_f;
+           SV **varbind_val_f;
+           SV **varbind_type_f;
+           AV *varbind;
+	   I32 varlist_len;
+	   I32 varlist_ind;
+	   I32 varbind_len;
+           SnmpSession *ss;
+           struct snmp_pdu *pdu, *response;
+           struct variable_list *vars;
+           struct variable_list *last_vars;
+           struct tree *tp;
+	   oid *oid_arr;
+	   int oid_arr_len = MAX_NAME_LEN;
+           SV *tmp_sv;
+           SV **sess_ptr_sv;
+           SV **err_str_svp;
+           SV **err_num_svp;
+           SV **err_ind_svp;
+           int status = 0;
+           int type;
+           int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
+           int use_enums = SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseEnums",8,1));
+           struct enum_list *ep;
+
+           oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
+
+           if (oid_arr && SvROK(sess_ref)) {
+
+              sess_ptr_sv = hv_fetch((HV*)SvRV(sess_ref), "SessPtr", 7, 1);
+	      ss = (SnmpSession *)SvIV((SV*)SvRV(*sess_ptr_sv));
+              err_str_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorStr", 8, 1);
+              err_num_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorNum", 8, 1);
+              err_ind_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorInd", 8, 1);
+              sv_setpv(*err_str_svp, "");
+              sv_setiv(*err_num_svp, 0);
+              sv_setiv(*err_ind_svp, 0);
+
+              pdu = snmp_pdu_create(SNMP_MSG_TRAP);
+
+              if (SvROK(varlist_ref)) {
+              varlist = (AV*) SvRV(varlist_ref);
+              varlist_len = av_len(varlist);
+	      for(varlist_ind = 0; varlist_ind <= varlist_len; varlist_ind++) {
+                 varbind_ref = av_fetch(varlist, varlist_ind, 0);
+                 if (SvROK(*varbind_ref)) {
+                    varbind = (AV*) SvRV(*varbind_ref);
+
+	            varbind_tag_f = av_fetch(varbind, VARBIND_TAG_F, 0);
+	            varbind_iid_f = av_fetch(varbind, VARBIND_IID_F, 0);
+	            varbind_val_f = av_fetch(varbind, VARBIND_VAL_F, 0);
+
+                    tp=__tag2oid((varbind_tag_f?SvPV(*varbind_tag_f,na):NULL),
+                                 (varbind_iid_f?SvPV(*varbind_iid_f,na):NULL),
+                                 oid_arr, &oid_arr_len, &type);
+                    if (oid_arr_len == 0) {
+                       if (verbose)
+                        warn("error: set: unable to determine oid for object");
+                       continue;
+                    }
+                    if (type == TYPE_UNKNOWN) {
+                      varbind_type_f = av_fetch(varbind,VARBIND_TYPE_F,0);
+                      type = __translate_appl_type(
+                              (varbind_type_f?SvPV(*varbind_type_f,na):NULL));
+                      if (type == TYPE_UNKNOWN) {
+                         if (verbose)
+                            warn("error: SNMP::Session::set: no type found for object");
+                         continue;
+                      }
+                    }
+                    if (type==TYPE_INTEGER && use_enums && tp && tp->enums) {
+                      for(ep = tp->enums; ep; ep = ep->next) {
+                        if (varbind_type_f && 
+                            !strcmp(ep->label, SvPV(*varbind_val_f,na))) {
+                          sv_setiv(*varbind_val_f, ep->value);
+                          break;
+                        }
+                      }
+                    }
+                    
+                    __add_var_val_str(pdu, oid_arr, oid_arr_len,
+                                  (varbind_val_f?SvPV(*varbind_val_f,na):NULL),
+                                  (varbind_val_f?SvCUR(*varbind_val_f):0),
+                                  type);
+                 } /* if var_ref is ok */
+              } /* for all the vars */
+              }
+
+	      pdu->enterprise = (oid *)malloc( MAX_NAME_LEN * sizeof(oid));
+  	      if (__scan_num_objid(enterprise, pdu->enterprise,
+                                   &pdu->enterprise_length) != SUCCESS) {
+		  if (verbose) warn("invalid enterprise id: %s", enterprise);
+	      }
+              if (agent && strlen(agent)) {
+                 pdu->agent_addr.sin_addr.s_addr = __parse_address(agent);
+              } else {
+                 pdu->agent_addr.sin_addr.s_addr = get_myaddr();
+              }
+              pdu->trap_type = generic;
+              pdu->specific_type = specific;
+              pdu->time = uptime;
+	
+              if (snmp_send(ss, pdu) == 0) {
+                 snmp_perror("snmptrap");
+              }	
+              snmp_free_pdu(pdu);
+	      XPUSHs(sv_2mortal(newSViv(snmp_get_errno())));
+           } else {
+err:
+              /* BUG!!! need to return an error value */
+              XPUSHs(&sv_undef); /* no mem or bad args */
+           }
+	Safefree(oid_arr);
+        }
+
+int
+snmp_trapV2(sess_ref,dstParty,srcParty,trap_oid,uptime,varlist_ref)
+        SV *	sess_ref
+        char *	dstParty
+        char *	srcParty
+        char *	trap_oid
+        int	uptime
+        SV *	varlist_ref
+	PPCODE:
+	{
+           AV *varlist;
+           SV **varbind_ref;
+           SV **varbind_tag_f;
+           SV **varbind_iid_f;
+           SV **varbind_val_f;
+           SV **varbind_type_f;
+           AV *varbind;
+	   I32 varlist_len;
+	   I32 varlist_ind;
+	   I32 varbind_len;
+           SnmpSession *ss;
+           struct snmp_pdu *pdu, *response;
+           struct variable_list *vars;
+           struct variable_list *last_vars;
+           struct tree *tp;
+	   oid *oid_arr;
+	   int oid_arr_len = MAX_NAME_LEN;
+           SV *tmp_sv;
+           SV **sess_ptr_sv;
+           SV **err_str_svp;
+           SV **err_num_svp;
+           SV **err_ind_svp;
+           int status = 0;
+           int type;
+           int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
+           int use_enums = SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseEnums",8,1));
+           struct enum_list *ep;
+
+           oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
+
+           if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
+
+              sess_ptr_sv = hv_fetch((HV*)SvRV(sess_ref), "SessPtr", 7, 1);
+	      ss = (SnmpSession *)SvIV((SV*)SvRV(*sess_ptr_sv));
+              err_str_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorStr", 8, 1);
+              err_num_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorNum", 8, 1);
+              err_ind_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorInd", 8, 1);
+              sv_setpv(*err_str_svp, "");
+              sv_setiv(*err_num_svp, 0);
+              sv_setiv(*err_ind_svp, 0);
+
+              pdu = snmp_pdu_create(SNMP_MSG_SET);
+
+              varlist = (AV*) SvRV(varlist_ref);
+              varlist_len = av_len(varlist);
+	      for(varlist_ind = 0; varlist_ind <= varlist_len; varlist_ind++) {
+                 varbind_ref = av_fetch(varlist, varlist_ind, 0);
+                 if (SvROK(*varbind_ref)) {
+                    varbind = (AV*) SvRV(*varbind_ref);
+
+	            varbind_tag_f = av_fetch(varbind, VARBIND_TAG_F, 0);
+	            varbind_iid_f = av_fetch(varbind, VARBIND_IID_F, 0);
+	            varbind_val_f = av_fetch(varbind, VARBIND_VAL_F, 0);
+
+                    tp=__tag2oid((varbind_tag_f?SvPV(*varbind_tag_f,na):NULL),
+                                 (varbind_iid_f?SvPV(*varbind_iid_f,na):NULL),
+                                 oid_arr, &oid_arr_len, &type);
+                    if (oid_arr_len == 0) {
+                       if (verbose)
+                        warn("error: set: unable to determine oid for object");
+                       continue;
+                    }
+                    if (type == TYPE_UNKNOWN) {
+                      varbind_type_f = av_fetch(varbind,VARBIND_TYPE_F,1);
+                      type = __translate_appl_type(
+                              (varbind_type_f?SvPV(*varbind_type_f,na):NULL));
+                      if (type == TYPE_UNKNOWN) {
+                         if (verbose)
+                            warn("error: set: no type found for object");
+                         continue;
+                      }
+                    }
+                    if (type==TYPE_INTEGER && use_enums && tp && tp->enums) {
+                      for(ep = tp->enums; ep; ep = ep->next) {
+                        if (varbind_type_f && 
+                            !strcmp(ep->label, SvPV(*varbind_val_f,na))) {
+                          sv_setiv(*varbind_val_f, ep->value);
+                          break;
+                        }
+                      }
+                    }
+                    
+                    __add_var_val_str(pdu, oid_arr, oid_arr_len,
+                                  (varbind_val_f?SvPV(*varbind_val_f,na):NULL),
+                                  (varbind_val_f?SvCUR(*varbind_val_f):0),
+                                  type);
+                 } /* if var_ref is ok */
+              } /* for all the vars */
+
+	      status = __send_sync_pdu(ss, pdu, &response,
+				       NO_RETRY_NOSUCH,
+                                       *err_str_svp, *err_num_svp,
+                                       *err_ind_svp);
+
+              if (response) snmp_free_pdu(response);
+
+	      XPUSHs(sv_2mortal(newSViv(snmp_get_errno())));
+           } else {
+err:
+              /* BUG!!! need to return an error value */
+              XPUSHs(&sv_undef); /* no mem or bad args */
+           }
+	Safefree(oid_arr);
+        }
+
 
 char *
 snmp_get_type(tag)
@@ -1481,10 +1964,11 @@ snmp_map_enum(tag)
 #define SNMP_XLATE_MODE_TAG2OID 0
 
 char *
-snmp_translate_obj(var,mode,use_long)
+snmp_translate_obj(var,mode,use_long,auto_init)
 	char *		var
 	int		mode
 	int		use_long
+	int		auto_init
 	CODE:
 	{
 	   char str_buf[STR_BUF_SIZE];
@@ -1494,6 +1978,16 @@ snmp_translate_obj(var,mode,use_long)
            char * iid;
            int status = FAILURE;
            int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
+           
+           if (Mib == NULL && auto_init) {
+              if (verbose) warn("initializing MIB\n");
+                 init_mib();
+              if (Mib) {
+                 if (verbose) warn("done\n");
+              } else {
+                 if (verbose) warn("failed\n");
+              }
+           }
 
            str_buf[0] = '\0';
   	   switch (mode) {
@@ -1538,10 +2032,55 @@ snmp_set_save_descriptions(val)
 	}
 
 void
+snmp_set_debugging(val)
+	int	val
+	CODE:
+	{
+	   snmp_set_do_debugging(val);
+	}
+
+void
 snmp_sock_cleanup()
 	CODE:
 	{
 	   SOCK_CLEANUP;
+	}
+
+void
+snmp_main_loop()
+	CODE:
+	{
+        int numfds, fd_count;
+        fd_set fdset;
+        struct timeval timeout, *tvp;
+        int block;
+        while (1) {
+           numfds = 0;
+     
+           FD_ZERO(&fdset);
+           block = 1;
+           tvp = &timeout;
+           timerclear(tvp);
+           snmp_select_info(&numfds, &fdset, tvp, &block);
+     /*  printf("post-select: numfds = %ld, block = %ld\n", numfds, block);*/
+           if (block == 1) tvp = NULL; /* block without timeout */
+           fd_count = select(numfds, &fdset, 0, 0, tvp);
+           if (fd_count > 0) {
+              snmp_read(&fdset);
+           } else switch(fd_count) {
+              case 0:
+                 snmp_timeout();
+                 break;
+              case -1:
+                 if (errno == EINTR) {
+                    continue;
+                 } else {
+                    snmp_set_detail(strerror(errno));
+                    snmp_errno = SNMPERR_GENERR;
+                 }
+              default:
+           }
+        }
 	}
 
 MODULE = SNMP	PACKAGE = SNMP::MIB::NODE 	PREFIX = snmp_mib_node_
@@ -1588,18 +2127,27 @@ snmp_mib_node_FETCH(tp_ref, key)
                  break;
 	      case 's': /* subID */
                  if (strncmp("subID", key, strlen(key))) {
-                   if (strncmp("status", key, strlen(key))) break;
+                   if (strncmp("status", key, strlen(key))) {
+                      if (strncmp("syntax", key, strlen(key))) break;
+                      if (tp->tc_index >= 0) { 
+                         sv_setpv(ST(0), get_tc_descriptor(tp->tc_index));
+                      } else {
+                         __get_type_str(tp->type, str_buf);
+                         sv_setpv(ST(0), str_buf);
+                      }
+                      break;
+                   }
                    switch(tp->status) {
-                     case STATUS_MANDATORY:
+                     case MIB_STATUS_MANDATORY:
                        sv_setpv(ST(0),"Mandatory");
                        break;
-                     case STATUS_OPTIONAL:
+                     case MIB_STATUS_OPTIONAL:
                        sv_setpv(ST(0),"Optional");
                        break;
-                     case STATUS_OBSOLETE:
+                     case MIB_STATUS_OBSOLETE:
                        sv_setpv(ST(0),"Obsolete");
                        break;
-                     case STATUS_DEPRECATED:
+                     case MIB_STATUS_DEPRECATED:
                        sv_setpv(ST(0),"Deprecated");
                        break;
                      default:
@@ -1708,29 +2256,33 @@ snmp_mib_node_FETCH(tp_ref, key)
                  sv_setsv(ST(0), *nn_hrefp);
                  break;
 	      case 't': /* type */
-                 if (strncmp("type", key, strlen(key))) break;
+                 if (strncmp("type", key, strlen(key))) {
+                    if (strncmp("textualConvention", key, strlen(key))) break;
+                    sv_setpv(ST(0), get_tc_descriptor(tp->tc_index));
+                    break;
+                 }
                  __get_type_str(tp->type, str_buf);
                  sv_setpv(ST(0), str_buf);
                  break;
 	      case 'a': /* access */
                  if (strncmp("access", key, strlen(key))) break;
                  switch	(tp->access) {
-                   case ACCESS_READONLY:
+                   case MIB_ACCESS_READONLY:
                      sv_setpv(ST(0),"ReadOnly");
                      break;
-                   case ACCESS_READWRITE:
+                   case MIB_ACCESS_READWRITE:
                      sv_setpv(ST(0),"ReadWrite");
                      break;
-                   case ACCESS_WRITEONLY:
+                   case MIB_ACCESS_WRITEONLY:
                      sv_setpv(ST(0),"WriteOnly");
                      break;
-                   case ACCESS_NOACCESS:
+                   case MIB_ACCESS_NOACCESS:
                      sv_setpv(ST(0),"NoAccess");
                      break;
-                   case ACCESS_NOTIFY:
+                   case MIB_ACCESS_NOTIFY:
                      sv_setpv(ST(0),"Notify");
                      break;
-                   case ACCESS_CREATE:
+                   case MIB_ACCESS_CREATE:
                      sv_setpv(ST(0),"Create");
                      break;
                    default:
