@@ -73,8 +73,9 @@ sub find_files {
 
 sub GetTestHost {
     my($host,$comm);
+    my $cat = ($^O =~ /win32/i ? 'type' : 'cat');
     if (-f 'host') {
-       ($host, $comm) = split(' ',`cat host`);
+       ($host, $comm) = split(' ',`$cat host`);
        return if $host and $comm;
     }
     $host ||= 'localhost';

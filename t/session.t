@@ -94,7 +94,7 @@ printf "%s %d\n", ($s1->{ErrorInd} == 1) ? "ok" :"not ok", $n++;
 my $var = new SNMP::Varbind(['sysDescr']);
 my $res2 = $s1->getnext($var);
 printf "%s %d\n", ($var->tag eq 'sysDescr') ? "ok" :"not ok", $n++;
-printf "%s %d\n", ($var->iid == 0) ? "ok" :"not ok", $n++;
+printf "%s %d\n", (defined $var->iid and $var->iid == 0) ? "ok" :"not ok", $n++;
 printf "%s %d\n", ($var->val eq $res2) ? "ok" :"not ok", $n++;
 
 ######################################################################

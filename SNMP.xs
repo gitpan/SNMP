@@ -26,6 +26,10 @@
 #define __P(x) x
 #endif
 
+#ifndef G_VOID
+#define G_VOID G_DISCARD
+#endif
+
 #ifndef in_addr_t
 #define in_addr_t u_long
 #endif
@@ -570,8 +574,8 @@ int  * type;
 
    if (strchr(tag,'.')) { /* if multi part tag  */
       if (!__scan_num_objid(tag, newname, &newname_len)) { /* numeric tag */
-         newname_len = MAX_NAME_LEN;
-         get_node(tag, newname, &newname_len); /* long name */
+         newname_len = MAX_OID_LEN;
+         read_objid(tag, newname, &newname_len); /* long name */
       }
       if (newname_len) rtp = tp = get_tree(newname, newname_len, Mib);
       if (type) *type = (tp ? tp->type : TYPE_UNKNOWN);
@@ -649,7 +653,7 @@ oid *doid_arr;
 int *doid_arr_len;
 char * soid_str;
 {
-   char soid_buf[MAX_NAME_LEN*3];
+   char soid_buf[STR_BUF_SIZE];
    char *cp;
 
    if (!soid_str || !*soid_str) return SUCCESS;/* successfully added nothing */
@@ -847,7 +851,7 @@ void *cb_data;
   struct tree *tp;
   int len;
   oid *oid_arr;
-  int oid_arr_len = MAX_NAME_LEN;
+  int oid_arr_len = MAX_OID_LEN;
   SV *tmp_sv;
   int type;
   char tmp_type_str[MAX_TYPE_NAME_LEN];
@@ -1384,7 +1388,7 @@ snmp_set(sess_ref, varlist_ref, perl_callback)
            struct variable_list *last_vars;
            struct tree *tp;
 	   oid *oid_arr;
-	   int oid_arr_len = MAX_NAME_LEN;
+	   int oid_arr_len = MAX_OID_LEN;
            SV *tmp_sv;
            SV **sess_ptr_sv;
            SV **err_str_svp;
@@ -1396,7 +1400,7 @@ snmp_set(sess_ref, varlist_ref, perl_callback)
            int use_enums = SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseEnums",8,1));
            struct enum_list *ep;
 
-           oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
+           oid_arr = (oid*)malloc(sizeof(oid) * MAX_OID_LEN);
 
            if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
 
@@ -1508,7 +1512,7 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
            struct tree *tp;
            int len;
 	   oid *oid_arr;
-	   int oid_arr_len = MAX_NAME_LEN;
+	   int oid_arr_len = MAX_OID_LEN;
            SV *tmp_sv;
            int type;
 	   char tmp_type_str[MAX_TYPE_NAME_LEN];
@@ -1521,7 +1525,7 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
            int sprintval_flag = USE_BASIC;
            int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
 
-           oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
+           oid_arr = (oid*)malloc(sizeof(oid) * MAX_OID_LEN);
 
            if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
 
@@ -1638,7 +1642,7 @@ snmp_getnext(sess_ref, varlist_ref, perl_callback)
            struct tree *tp;
            int len;
 	   oid *oid_arr;
-	   int oid_arr_len = MAX_NAME_LEN;
+	   int oid_arr_len = MAX_OID_LEN;
            SV *tmp_sv;
            int type;
 	   char tmp_type_str[MAX_TYPE_NAME_LEN];
@@ -1655,7 +1659,7 @@ snmp_getnext(sess_ref, varlist_ref, perl_callback)
            int sprintval_flag = USE_BASIC;
            int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
 
-           oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
+           oid_arr = (oid*)malloc(sizeof(oid) * MAX_OID_LEN);
 
            if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
 
@@ -1775,7 +1779,7 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
            struct variable_list *last_vars;
            struct tree *tp;
 	   oid *oid_arr;
-	   int oid_arr_len = MAX_NAME_LEN;
+	   int oid_arr_len = MAX_OID_LEN;
            SV *tmp_sv;
            SV **sess_ptr_sv;
            SV **err_str_svp;
@@ -1787,7 +1791,7 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
            int use_enums = SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseEnums",8,1));
            struct enum_list *ep;
 
-           oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
+           oid_arr = (oid*)malloc(sizeof(oid) * MAX_OID_LEN);
 
            if (oid_arr && SvROK(sess_ref)) {
 
@@ -1852,7 +1856,7 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
               } /* for all the vars */
               }
 
-	      pdu->enterprise = (oid *)malloc( MAX_NAME_LEN * sizeof(oid));
+	      pdu->enterprise = (oid *)malloc( MAX_OID_LEN * sizeof(oid));
   	      if (__scan_num_objid(enterprise, pdu->enterprise,
                                    &pdu->enterprise_length) != SUCCESS) {
 		  if (verbose) warn("invalid enterprise id: %s", enterprise);
@@ -1906,7 +1910,7 @@ snmp_trapV2(sess_ref,dstParty,srcParty,trap_oid,uptime,varlist_ref)
            struct variable_list *last_vars;
            struct tree *tp;
 	   oid *oid_arr;
-	   int oid_arr_len = MAX_NAME_LEN;
+	   int oid_arr_len = MAX_OID_LEN;
            SV *tmp_sv;
            SV **sess_ptr_sv;
            SV **err_str_svp;
@@ -1918,7 +1922,7 @@ snmp_trapV2(sess_ref,dstParty,srcParty,trap_oid,uptime,varlist_ref)
            int use_enums = SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseEnums",8,1));
            struct enum_list *ep;
 
-           oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
+           oid_arr = (oid*)malloc(sizeof(oid) * MAX_OID_LEN);
 
            if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
 
@@ -2075,8 +2079,8 @@ snmp_translate_obj(var,mode,use_long,auto_init)
 	CODE:
 	{
 	   char str_buf[STR_BUF_SIZE];
-	   oid oid_arr[MAX_NAME_LEN];
-           int oid_arr_len = MAX_NAME_LEN;
+	   oid oid_arr[MAX_OID_LEN];
+           int oid_arr_len = MAX_OID_LEN;
            char * label;
            char * iid;
            int status = FAILURE;

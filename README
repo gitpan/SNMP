@@ -1,6 +1,6 @@
-		   Perl5 SNMP Extension Module v1.8
+		   Perl5 SNMP Extension Module v1.8.1
 		       for the UCD SNMP Library
-		G.S. Marzot (gmarzot@baynetworks.com)
+		G.S. Marzot (gmarzot@nortelnetworks.com)
 
 Contents:
    Introduction:
@@ -22,7 +22,7 @@ client library toolkit. The UCD SNMP library was originally based on
 version 2.1.2.1 of the CMU SNMP library but has incorporated many
 bugfixes and enhancements. For information on the UCD SNMP library see
 the documentation provided with the UCD SNMP distribution or the
-ucd-snmp project web page: http://www.ece.ucdavis.edu/ucd-snmp
+ucd-snmp project web page: http://ucd-snmp.ucdavis.edu
 
 (NOTE: In previous releases this module was compatible with both the
 UCD and CMU SNMP libraries. Starting with Perl5/SNMP-1.7 this module
@@ -32,10 +32,10 @@ features)
 Availability:
 
 The most recent release of the UCD SNMP Libray can be found at:
-ftp://ftp.ece.ucdavis.edu/pub/snmp/ucd-snmp.tar.gz
+ftp://ucd-snmp.ucdavis.edu
 
 The most recent release of the Perl5/SNMP module can be found at:
-ftp://ftp.corpeast.baynetworks.com/netman/snmp/perl5/SNMP.tar.gz
+ftp://ftp-east.baynetworks.com/netman/snmp/perl5/SNMP.tar.gz
 (as well as the usual perl archives, CPAN)
 
 Supported Platforms:
@@ -47,14 +47,15 @@ Supported Platforms:
 
 Release Notes:
 
-SNMP version 1.8 is known to interoperate w/ ucd-snmp-3.5.3 (1.8a1 was
-targetted at ucd-snmp-3.4). Compatibility with earlier or later
-versions of ucd-snmp is not guaranteed due to the dynamic nature of
-free software development :).
+SNMP version 1.8.1 is known to interoperate w/ ucd-snmp-3.5.3 thru
+3.6.2.  WARNING: ucd-snmp-3.6.1 has a memory bug which will cause
+problems when used with this module (upgrade to ucd-snmp-3.6.2).
+Compatibility with earlier or later versions of ucd-snmp is not
+guaranteed due to the dynamic nature of free software development :).
 
 Installation:
 
-build and install ucd-snmp-3.5.3
+build and install ucd-snmp
 
 note: you should ensure that any previous ucd-snmp or cmu snmp
 installation is located so that the wrong libsnmp or headers are not
@@ -64,6 +65,25 @@ perl Makefile.PL
 make
 make test
 make install
+
+Win32 
+
+(note: only builds on NT as far as I know. requires VC++ 5.0-6.0, be
+       sure to run vcvars32.bat first)
+
+for ActiveState Perl  (tested with ASPerl5.005_03 (515))
+
+perl Makefile.PL CAPI=TRUE
+nmake
+nmake test
+nmake install
+
+for gsarathy's perl5.004_02
+
+perl Makefile.PL CAPI=TRUE
+nmake
+nmake test
+nmake install
 
 note: 'make test' requires that an agent is running to which you have
 read/write access. For the ucd-snmp snmpd this may involve setting up
@@ -464,7 +484,7 @@ Sometimes compiling the UCD snmp library with
 'position-independent-code' enabled is required (HPUX specifically).
 
 if you cannot resolve the problem you can email me at
-gmarzot@baynetworks.com and/or ucd-snmp-coders@ece.ucdavis.edu.
+gmarzot@nortelnetworks.com and/or ucd-snmp-coders@ucd-snmp.ucdavis.edu.
 and maybe I can help.
 
 please give sufficient information to analyze the problem (OS type,
@@ -488,7 +508,9 @@ Jacques Vidrine
 Carl Jacobsen
 Wayne Marquette
 Scott Schumate
+Michael Slifcak
 Perl5 Porters
+
 
 Apologies to any/all who's patch/feature/request was not mentioned or
 included - most likely it was lost when paying work intruded on my
@@ -496,10 +518,23 @@ fun. Please try again if you do not see a desired feature. This may
 actually turn out to be a decent package with such excellent help and
 the fact that I have more time to work on it than in the past.
 
-bugs, comments, questions to gmarzot@baynetworks.com
+bugs, comments, questions to gmarzot@nortelnetworks.com
 
 ------
 History:
+
+Bugs fixed and changes in 1.8.1
+
+1) updated docs
+
+2) fixed #defines from AMX_NAME_LEN to MAX_OID_LEN (mslifcak)
+
+3) reverted __tag2oid to use read_objid rather than get_node. this
+gives full name resolution provided by libsnmp and no longer creates
+problesm on failure since 3.6.2 removes the call to 'exit' in
+read_objid
+
+4) fixed Makefile.PL to use win32 'type' vs. 'cat'
 
 Bugs fixed and changes in 1.8
 
