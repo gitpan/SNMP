@@ -1,70 +1,159 @@
-		   Perl5 CMU-SNMPv2 Extension Module
+		      Perl5 SNMP Extension Module
+		  Version 1.7 (supports UCD port only)
+				6/16/96
 		  G.S.Marzot(gmarzot@baynetworks.com)
-				3/25/96
+
 
 Introduction:
 
-This is a Perl5 extension module which provides an interface to the
-CMU-SNMPv2 library. It was developed on a linux box and tested on a
-sun4_4.1 system using CMU-SMNMPv2.1.2. There have been reports of
-success on hpux, irix and solaris systems so far. (Let me know of
-problems and/or successes on other boxes please)
+This is a Perl5 extension module which provides an interface to the UCD
+port of the CMU SNMP toolkit/library. This version was developed on a
+linux box and tested with perl5.004 and ucd-snmp-3.2 (based on
+cmu-snmp-2.1.2.1). There have been reports of success on sunos, hpux,
+aix, irix and solaris systems so far. (Let me know of problems and/or
+successes on other boxes please)
 
-the most recent version of the module can be retrieved from
+The most recent version of the module can be retrieved from
 ftp:/ftp.wellfleet.com/netman/snmp/perl5/SNMP.tar.gz
 (as well as the usual perl archives, CPAN)
 
-cmu source may be found in a variety of locations, try
-ftp://ftp.ece.ucdavis.edu/pub/snmp (sun, hp port etc.)
-ftp://sunsite.unc.edu:/pub/Linux/system/Network/admin (linux)
+The ucd port of cmu source may be found at the following location:
+ftp://ftp.ece.ucdavis.edu/pub/snmp
 
+(NOTE: this release supports the UCD port exclusively and provides
+       only SNMP v1 functionality - work is being done on a version of
+       this module which will interface to an updated, SNMPv2c ,
+       version of the mainline CMU code - see XXXX for more details)
 
 Description:
 
 The basic operations offered by SNMP are provided through an object
-oriented interface for modularity and ease of use. The primary object is
-SNMP::Session which is implemented as a blessed hash reference. The
-object supports 'get', 'set', and 'getNext' method calls. All calls are
-blocking/synchronous (i.e., they must receive a response or timeout
-before control is returned to the caller). The methods take a variety of
-input argument formats(see test.pl and examp/* for examples). A
-description of the objects data fields follow.
+oriented interface for modularity and ease of use. The primary class is
+SNMP::Session which is implemented as a blessed hash reference. This
+class supplies 'get', 'fget', 'set', and 'getnext' method calls. All
+calls are currently blocking/synchronous (i.e., they must receive a
+response or timeout before control is returned to the caller - an
+asyncronous implementation is very high on the todo list). The methods
+take a variety of input argument formats (see below). A description of
+the fields which can be initialized/overriden when a SNMP::Session
+object is created follows:
 
 SNMP::Session
- DestHost - default 'localhost', hostname or ip addr of SNMP agent
- Community - default 'public', SNMP community string
- Version - default '1', v1 support only for now
- Timeout - default '1000000', micro-seconds before retry
- Retries - default '5', retries before failure
- RetryNoSuch - default '1', for get request NOSUCH errors, the pdu will
+public:
+ DestHost    - default 'localhost', hostname or ip addr of SNMP agent
+ Community   - default 'public', SNMP community string
+ Version     - default '1', v1 support only for now
+ RemotePort  - default '161', allow remote UDP port to be overriden
+ Timeout     - default '1000000', micro-seconds before retry
+ Retries     - default '5', retries before failure
+ RetryNoSuch - default '1', 'get' request NOSUCH errors in the pdu will
                be repaired, removing the varbind in error, and resent -
                undef will be returned for all NOSUCH varbinds, setting
                to '0' disables this feature and the entire get request
                will fail on any NOSUCH error
- ErrorStr - read-only, returns a test description of any error occuring
-            in the last request
- ErrorNum - read-only, returns the snmp_err or staus of last request
-private
- DestAddr - internal field used to hold the translated DestHost field
- SessPtr - internal field used to cache a created session structure
+ VarFormats  - default 'undef', used by 'fget', holds an hash
+               reference of output value formatters, (e.g., {<obj> =>
+               <sub-ref>, ... }, <obj> must match the <obj> and format
+               used in the get operation. A special <obj>, '*', may be
+               used to apply all <obj>s, the supplied sub is called to
+               translate the value to a new format. The sub is called
+               passing the Varbind as the arg
+ TypeFormats - default 'undef', used by 'fget', holds an hash
+               reference of output value formatters, (e.g., {<type> =>
+               <sub-ref>, ... }, the supplied sub is called to translate
+               the value to a new format, unless a VarFormat mathces first
+               (e.g., $session->{TypeFormats}{INTEGER} = \&mapEnum();)
+ ErrorStr    - read-only, holds the error message assoc. w/ last request
+ ErrorNum    - read-only, holds the snmp_err or staus of last request
+ ErrorInd    - read-only, holds the snmp_err_index when appropriate
 
-In addition a number of package variables and methods are provided
+private:
+ DestAddr    - internal field used to hold the translated DestHost field
+ SessPtr     - internal field used to cache a created session structure
 
-$SNMP::VERSION - the current version specifier (e.g., 1.6)
+methods:
+ new(<fields>)   - Constructs a new SNMP::Session object. The fields are
+                   passed to the contructor as a hash list
+                   (e.g., $session = new SNMP::Session(DestHost => 'foo',
+                    Community => 'private');
+ get(<vars>)     - do SNMP GET, multiple <vars> formats accepted,
+                   updates <vars>, returns retrieved value(s)
+ fget(<vars>)
+                 - do SNMP GET and format the values according
+                   the handlers specified in $sess->{VarFormats} and
+                   $sess->{TypeFormats}
+ getnext(<vars>) - do SNMP GETNEXT, multiple <vars> formats accepted,
+                   updates <vars>, returns retrieved value(s)
+ set(<vars>)     - do SNMP SET, multiple <vars> formats accepted,
+                   returns snmp_errno
 
-$SNMP::auto_init_mib - default '1', enables the immediate loading of the
-                       ASN mib when the package is loaded - if set to '0'
-                       mib loading must be done explicitly (see SNMP::setMib)
+ getbulk(<non-repeaters>, <max-repeaters>, <vars>)
+                 - * Not Implemented *
 
-SNMP::setMib - allows dynamic re-initialization of the mib to be used
+<vars> may be one of the following forms:
 
-SNMP::translateObj - will convert a text object tag to a numeric OID and
-                     vice-versa. iid suffix is always retained numerically
+ SNMP::VarList:  - Implemeted as a blessed reference to an array of
+                   SNMP::Varbinds, [<varbind1>, <varbind2>, ...]
 
+ SNMP::Varbind:  - Implemeted as a blessed reference to a 4 element array;
+		   [<obj>, <iid>, <val>, <type>].
+                   <obj>  - one of the following forms:
+                          1) leaf identifier (e.g., 'sysDescr') assumed to be
+                             unique for practical purposes
+                          2) fully qualified identifier (e.g.,
+			     '.iso.org.dod.internet.mgmt.mib-2.system.sysDescr')
+                          3) fully qualified, dotted-decimal, numeric OID (e.g.,
+                             '.1.3.6.1.2.1.1.1')
+                   <iid>  - the dotted-decimal, instance identifier. for
+                            scalars use '0'
+		   <val>  - the SNMP data value retrieved from, or being set
+                            to, the agent
+                   <type> - SNMP data type, this field need not be supplied for
+                            set operations to attributes already described in
+                            the Mib. If a numeric OID is used to set an object
+                            which is not in the Mib being used, <type> must be
+                            supplied (see 'getType' for values)
+
+ simple scalar   - light weight form of <var> used to 'set' or 'get' a
+                   single attribute without constructing an SNMP::Varbind.
+                   (e.g., 'sysDescr.0'). for 'set' operations the value
+                   is passed as a second arg. This form is not updated
+                   in getnext and only returns values on the stack
+
+SNMP package variables and functions:
+
+ $SNMP::VERSION       - the current version specifier (e.g., 1.7)
+
+ $SNMP::auto_init_mib - default '1', enables the immediate loading of the
+                        ASN.1 mib when the package is loaded - if set to '0'
+                        mib loading must be done explicitly (see SNMP::setMib)
+
+ $SNMP::verbose       - default '0', verbosity level, 0 => no output
+
+ &SNMP::setMib(<file>) - allows dynamic (re)parsing of the mib and explicit
+                        specification of mib file independent of enviroment
+                        variables. called with no args will exhibit default 
+                        behaviour indicated by environment variables (see
+                        ucd mib_api docs). subsequent calls to setMib will
+                        cause previous mib to be freed and replaced.
+
+ &SNMP::addMib(<file>) - allows dynamic (re)parsing of the mib and explicit
+                        specification of mib file to be added to currently pare
+                        seed Mib tree
+
+ &SNMP::translateObj(<var>) - will convert a text object tag to an OID and
+                            vice-versa. iid suffix is retained numerically
+
+ &SNMP::getType(<var>) - return SNMP data type for given textual identifier
+                        OBJECTID, OCTETSTR, INTEGER, NETADDR, IPADDR, COUNTER
+                        GAUGE, TIMETICKS, OPAQUE, or undef
+
+ &SNMP::mapEnum(<var>) - converts integer value to enumertion tag defined
+                        in Mib
 
 Installation:
 
-build/install version 2.1.2 of CMU-SNMPv2 libsnmp.a (e.g., /usr/local/lib)
+build/install ucd-snmp-3.2 libsnmp.a (e.g., /usr/local/lib)
 
 make sure header files are available someplace (e.g., /usr/local/include)
 
@@ -75,10 +164,10 @@ make
 make test
 make install
 
-the CMU tool-kit requires that an ASN.1 mib be available. 'mib.txt' is the
-default name looked for first in the local directory and then in
-/etc. See CMU-SNMP docs for details on overriding the default or set mib
-explicitly with SNMP::setMib.
+the SNMP tool-kit requires that an ASN.1 mib be available. 'mib.txt' is
+the default name looked for first in the local directory and then in
+/etc. See UCD/CMU-SNMP docs for details on overriding the default or set
+mib explicitly with SNMP::setMib and SNMP::addMib.
 
 ------
 
@@ -86,3 +175,36 @@ Many thanks to those in the Perl community and perl5-porters list who
 helped immensely.
 
 bugs, comments, questions to gmarzot@baynetworks.com
+
+
+------
+Bugs fixed and changes in 1.7
+
+1) fixed seg fault on use of unknown/unparsed attribute in Varbind or
+   passed to translateObj
+
+2) fixed truncation of last char of attribute name in tranlsateObj
+
+3) handles variable args to setMib without complaint
+
+4) added SNMP::getType to query data type of a given attribute and
+   extended Varbind structure to hold type as well
+
+5) added RemotePort to SNMP::Session initialation list to allow override
+   of port 161
+
+6) removed noisy announcement of mib parse success unless verbose is set
+
+	       *WARNING*  *this may break existing scripts*
+7) changed return format for IpAddress and ObjID data types - these are
+   now always returned as dotted decimal strings as opposed to the
+   packed binary forms in 1.6
+	       *WARNING*  *this may break existing scripts*
+
+8) Session now sets ErrorInd (e.g., $session->{ErrorInd}) where appropriate
+
+9) Fully qualified attriubute names and numeric OIDs are now valid <obj>
+   defintions.
+
+10) Numeric OIDs can be used even if they have not been parsed in the
+    current Mib (note: <type> must be supplied)

@@ -8,7 +8,6 @@ SNMP.xs
 TODO
 typemap
 test.pl
-mib.txt
-examp/snmpwalk.pl
-examp/testleak.pl
+examples/snmpwalk.pl
+examples/testleak.pl
 hints/solaris.pl

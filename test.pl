@@ -1,4 +1,4 @@
-use SNMP 1.6;
+use SNMP 1.7;
 
 $host = shift;
 unless ($host) {
@@ -6,16 +6,23 @@ unless ($host) {
   chomp($host = <STDIN>);
 }
 
-# $SNMP::auto_init_mib = 0;
+$SNMP::verbose = 1; # right now only echos mib load progress, more later
+
+# $SNMP::auto_init_mib = 0; # set to one for programmer control of mib loading
+                          # see SNMP::setMib below
+
 print "\nBegin test script, SNMP Module version $SNMP::VERSION\n";
 print "Automatic Mib Initialization: ",
-       ($SNMP::auto_init_mib ? 'ENABLED' : 'DISABLED'), "\n\n";
+       ($SNMP::auto_init_mib ? 'ENABLED' : 'DISABLED'), "\n";
+print "Verbose Output: ",
+       ($SNMP::verbose ? 'ENABLED' : 'DISABLED'), "\n\n";
 
-# SNMP::setMib('mib.txt');
+# SNMP::setMib('mib.txt'); # load mib from specified file, pass second arg
+                           # non-zero to force mib change from prev. load
 
-# create Session (will use host from command line if supplied)
+# create new Session
 
-$session = new SNMP::Session ( DestHost => $host, Community => 'public' );
+$session = new SNMP::Session ( DestHost => $host );
 
 print "\n\$session->\{DestHost\}  = $session->{DestHost}\n",
       "\$session->\{DestAddr\}  = $session->{DestAddr}\n", 
@@ -39,28 +46,18 @@ $vars = new SNMP::VarList (
 # GET tests
 print "Doing GET test.\n";
 @ret = $session->get($vars);
-print "get test (return vals):\n(1)$ret[0]\n(2)$ret[1]\n(3)$ret[2]\n(4)$ret[3]\n(5)$ret[4]\n(6)$ret[5]\n(7)$ret[6]\n(8)$ret[7]\n\n";
+print "get test (return vals):\n(1)$ret[0]\n(2)$ret[1]\n(3)$ret[2]\n(4)$ret[3]\n(5)$ret[4]\n(6)$ret[5]\n(7)$ret[6]\n(8)$ret[7]\n\n" if @ret;
+print "ErrorStr =>\"$session->{ErrorStr}\", ErrorNum => \"$session->{ErrorNum}\"\n" unless @ret;
 
 print "get test (varlist):\n";
 foreach $var (@{$vars}) {
-  $name = $var->[$SNMP::Varbind::tag_f];
-  $iid = $var->[$SNMP::Varbind::iid_f];
-  $val = $var->[$SNMP::Varbind::val_f] || '';
-  print "$name.$iid = $val\n";
+  $name = $var->tag;
+  $iid = $var->iid;
+  $val = $var->val || '';
+  $type = $var->type || '';
+  print "$name.$iid = $val($type)\n";
 }
 print "\n";
-
-$ip = $session->get(['wfIpInterfaceMask', "$host.1"]);
-print "get wfIpInterfaceMask(anon array ref arg): ",
-      join('.', unpack("C4",$ip)),", $ip(raw)\n\n";
-
-$ip = $session->get("wfIpInterfaceMask.$host.1");
-print "get wfIpInterfaceMask(scalar arg): ",
-      join('.',unpack("C4", $ip)),", $ip(raw)\n\n";
-
-$oct = $session->get(['wfNodeProtoMap', '0']);
-print "get wfNodeProtoMap(octet string): ",
-      join(' ',  '0x', map {sprintf "%02X", $_} unpack("C*", $oct)), " \n\n";
 
 # setup for SET test -  make sure to change things back the way they were!
 print "Doing SET test.\n";
@@ -84,31 +81,43 @@ print "getnext(return vals): @result\n\n";
 
 print "getnext test (varlist):\n";
 foreach $var (@{$vars}) {
-  $name = $var->[$SNMP::Varbind::tag_f];
-  $iid = $var->[$SNMP::Varbind::iid_f];
-  $val = $var->[$SNMP::Varbind::val_f];
-  if ($name eq 'sysObjectID' ) {
-    print "$name.$iid = ", join('.', unpack("I*", $val)), "\n";
-  } else {
-    print "$name.$iid = $val\n";
-  }
+  $name = $var->tag;
+  $iid = $var->iid;
+  $val = $var->val || '';
+  $type = $var->type || '';
+  print "$name.$iid = $val($type)\n";
 }
 print "\n";
 
 $val = $session->getnext('sysDescr.0');
+print "sysObjectID.0 = $val\n\n";
 
-print "sysObjectID.0 = ", join('.', unpack("I*", $val)), "\n\n";
+#test snmpwalk of a single table
+print "table walk test(getnext)\nipAddrEntry Table:\n";
+for ($vars=new SNMP::VarList([ipAdEntAddr],[ipAdEntIfIndex],[ipAdEntNetMask]),
+     @vals = $session->getnext($vars);
+     $vars->[0]->tag =~ /ipAdEntAddr/ and
+     not $session->{ErrorStr};
+     @vals = $session->getnext($vars)) {
+     
+     print "   $vals[0]/$vals[2] ($vals[1])\n";
 
-$val = SNMP::translateObj('sysDescr');
-print "val = $val\n"; $val =~ s/^\.//;
-$val = SNMP::translateObj($val);
-print "val = $val\n";
-$val = SNMP::translateObj('sysDescr.0');
-print "val = $val\n";
-$val = SNMP::translateObj($val);
-print "val = $val\n";
+}
 
-
+print "\nDoing type and translation tests:\n\n";
+$type = SNMP::getType('foo');
+print "type obj foo = ", (defined($type) ? "\"$type\"" :'"undef"'),"\n";
+$obj_tag = 'sysDescr';
+print "tag = $obj_tag\n";
+$oid = SNMP::translateObj($obj_tag);
+$type = SNMP::getType($obj_tag);
+print "oid = $oid, type = $type\n";
+$obj_tag = SNMP::translateObj($oid);
+print "tag = $obj_tag\n";
+$oid = SNMP::translateObj("$obj_tag.0");
+print "oid = $oid\n";
+$tag_iid = SNMP::translateObj($oid);
+print "tag.iid = $tag_iid\n";
 
 
  

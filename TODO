@@ -1,33 +1,40 @@
-allow argument to set/get/getNext to be a numeric OID in addition to a
-'tag.iid'. if the input arg is a numeric OID then getNext would return a
-numeric OID as well.
+better integration with ucd's mib loading. implement something like
+setMib,addMib,addMibDir,loadMibModule etc. I can't help thinking that
+there is a better/simpler user api for all these mib loading things that
+does not require setting a bunch of environment vars or calling a ton of
+routines. I need to understand ucd's mib loading api better to see if I
+can just provide a simpler subset through the perl api.
 
-add a 'getType' method to lookup SNMP type(syntax) for a given object so
-some formatting of retrieved value can be done for packed types like
-(OCT_STR, IP_ADDR, OID etc.) currently you must know what type you are
-getting back and unpack accordingly.
+allow argument to set/get/getNext to be a numeric OID in addition to a
+'tag.iid'. if the input arg is a numeric OID then getNext should
+continue to use a numeric OID as well as opposed to the attribute 'tag'
+as it does now..(I have patch that some gave as a start on this around
+sopmeplace)
 
 I think the error handling is fixed now - but it could use some
 validation/going over. See that informative strings are returned and the
 the error number is useful in all cases.
-(  Hi Joe,
-
-   I'm confused as to what is returned by
-   SNMP::Session::set.  For success and failure
-   I get 0, although ErrorStr contains a message
-   on failure.
-
-   Jacques Vidrine <nectar@communique.net>               Communique, Inc.
-)
 
 implement an asynchronous interface so multiple requests can be sent out
-and responses can be handled with a call-back.
+and responses can be handled with a call-back. probably should make a
+SNMP::snmp_callback which can be installed with Tk's fileevent or a
+geneal select loop (and/or EventDrivenserver) This would really be
+easier and more reliable/compatible if/when event handling is moved to
+the perl core.
 
 implement more v2-isms. (assuming some stability and consensus on what
-that is)
+that is) (waiting eagerly for dperkins work on polishing v2 in ucd's
+lib)
 
-Achim
-Btw. On top of my wish list is making SNMP work with -w.
+get SNMP module built and ruinning on win32 (dperkins also working on a
+port of the ucd lib to Win32)
 
+making SNMP work with -w.
 
-
+comments: a recent suggested fix (thanks mwiget) simplifies SNMP.xs code
+by calling sprint_value from the lib rather than the redundant way I was
+doing which essentially duplicated sprint_by_type. However, now octet
+string (and display string) values come out with quotes '"' around
+them. I find this very unnatual as it is a formatting issue which should
+not be assumed by the api. I would much prefer the raw unadorned string
+or hex vals but I guess this means going back to testing for type myself

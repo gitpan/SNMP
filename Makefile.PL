@@ -10,9 +10,12 @@ WriteMakefile(%MakeParams);
 
 sub InitMakeParams {
 my %Params = (
-    'NAME'	=> 'SNMP',
-    'VERSION'	=> 1.6,
-    'dist'      => { SUFFIX => "gz", COMPRESS => "gzip -9f"},
+    NAME         => 'SNMP',
+    dist         => { SUFFIX => "gz", COMPRESS => "gzip -9f"},
+    MAN3PODS     => ' ',  # Pods will be built by installman.
+    XSPROTOARG   => '-noprototypes', 	# XXX remove later?
+    VERSION_FROM => 'SNMP.pm',
+
 	    );
 my @IncludeFiles = qw[asn1.h parse.h snmp.h snmp_api.h 
 		      snmp_client.h snmp_impl.h];
@@ -20,7 +23,7 @@ my @IncludeFiles = qw[asn1.h parse.h snmp.h snmp_api.h
 my @IncludeDirs = qw[/usr/include /usr/local/include];
 
 my $IncludeDir = find_files(\@IncludeFiles,\@IncludeDirs) ||
-	prompt("Where are the cmu-snmpv2 include files installed?","/usr/local/include");
+    prompt("Where are the libsnmp include files?","/usr/local/include");
 
 my $LibDir = find_files(["libsnmp.a"],[qw[/usr/lib /usr/local/lib]]) ||
 	prompt("Where is libsnmp.a installed?","/usr/local/lib");

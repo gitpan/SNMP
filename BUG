@@ -1,12 +1,8 @@
 
+1) Memory leak
 
-
-Hi, Joe,
-
-I finally sat down and wrote my first SNMP Program. Was much easier
-that expected. Nice work! Although, as the Subject line indicates, we
-have a problem here:
-
+The following snippet used to gorw in memory (and may still) - please
+notify me if anyone still observes this and even better has a fix.
 
 perl -le '
 use SNMP;
@@ -16,20 +12,3 @@ print $obj->get(["ifNumber",0]);
 }
 '
 
-
-This program grows rapidly.
-
-I know, this doesn't happen in the *.pm code. This happens in the *xs
-files.
-
-Nonetheless I looked into both and found a couple of global variables
-which seem to be intended as lexical ones. I append the diffs. Let me
-know what you think about the leak. I see a malloc on oid_arr which
-has no corresponding free, I fixed this, but it still grows. The same
-fix seems appropriate in getnext. There's still a malloc for
-session. As I said, let me know...
-
-Regards,
-andreas
-
-Note: all obvious leaks have been fixed. Unfortunately I still hear reports of leaking. I am unable to observe these on my linux development machine but I do see them on sun. One recommendation is to use Wes Hardaker's purt of the CMU code. Apparently it has been cleaned up some and is much more portable. I would appreciate any assistance on tracking down and eliminating any leaking that still occurs. -GSM (gmarzot@baynetworks.com)
