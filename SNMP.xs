@@ -41,6 +41,10 @@ static int __send_sync_pdu _((struct snmp_session *, struct snmp_pdu *,
                            struct variable_list **, int , SV *, SV *));
 #define FAIL_ON_NULL_IID 1
 #define NO_FAIL_ON_NULL_IID 0
+
+typedef struct snmp_session SnmpSession;
+
+
 /* does a destructive disection of <label1>...<labeln>.<iid> returning
    <labeln> and <iid> in seperate strings (note: will destructively
    alter input string) */
@@ -53,28 +57,32 @@ int fail_on_null_iid;
    char *lcp;
    char *icp;
    int len = strlen(name);
+   int found_label = 0;
 
    *last_label = *iid = NULL;
 
    if (len == 0) return(FAILURE);
 
-   icp = &(name[len-1]);
+   lcp = icp = &(name[len-1]);
 
-   while (!isalpha(*icp)) {
-      if (icp == name) return(FAILURE);
-      icp--;
-   }
-
-   lcp = icp;
-
-   if ((*(++icp) != '.') && fail_on_null_iid) return(FAILURE);
-
-   if (*icp) *(icp++) = '\0';
-
-   while ((lcp > name) && isalpha(*lcp)) {
+   while (1) {
+      if (lcp == name) break;
+      if (*lcp == '.') {
+	if (found_label) {
+	   lcp++;
+           break;
+        } else {
+           icp = lcp;
+        }
+      }
+      if (isalpha(*lcp)) found_label = 1;
       lcp--;
    }
-   *last_label = ++lcp; *iid = icp;
+   if (*icp) *(icp++) = '\0';
+
+   if (!found_label || (!isdigit(*icp) && fail_on_null_iid)) return(FAILURE);
+
+   *last_label = lcp; *iid = icp;
    
    return(SUCCESS);
 }
@@ -103,11 +111,11 @@ int oida_arr_len;
 oid *oidb_arr;
 int oidb_arr_len;
 {
-   int i;
 
-   for(i = 0; (i <  oida_arr_len) && (i <  oidb_arr_len); i++) {
-	if (oida_arr[i] == oidb_arr[i]) continue;
-	return(oida_arr[i] > oidb_arr[i] ? 1 : -1);
+   for (;oida_arr_len && oidb_arr_len;
+	oida_arr++, oida_arr_len--, oidb_arr++, oidb_arr_len--) {
+	if (*oida_arr == *oidb_arr) continue;
+	return(*oida_arr > *oidb_arr ? 1 : -1);
    }
    if (oida_arr_len == oidb_arr_len) return(0);
    return(oida_arr_len > oidb_arr_len ? 1 : -1);
@@ -126,7 +134,12 @@ int  * type;
 
    *oid_arr_len = MAX_NAME_LEN;
 
-   if (tag && *tag) tp = find_node(tag, Mib);
+   if (tag && *tag) {
+	tp = find_node(tag, Mib);
+   } else {
+	*oid_arr_len = 0;
+        return FAILURE;
+   }
    if (type) *type = tp->type;
 
    /* code I don't really understand taken from get_node in snmp_client.c */
@@ -402,8 +415,6 @@ retry:
 
    if (response) snmp_free_pdu(response);
 
-   snmp_close(ss);
-
    return(status);
 }
 
@@ -558,47 +569,87 @@ MODULE = SNMP		PACKAGE = SNMP		PREFIX = snmp
 
 BOOT:
 # first blank line terminates bootstrap code
+Mib = 0;
 
 double
 constant(name,arg)
 	char *		name
 	int		arg
 
+
+SnmpSession *
+snmp_new_session(version, community, peer, retries, timeout)
+        char *	version
+        char *	community
+        char *	peer
+        int	retries
+        int	timeout
+	CODE:
+	{
+	   SnmpSession session;
+	   SnmpSession *ss;
+
+           memset(&session, 0, sizeof(SnmpSession));
+
+	   if (strcmp(version, "1") != 0) {
+	      warn("SNMP v1 support only\n");
+           }
+
+           session.version = SNMP_VERSION_1;
+           session.community_len = strlen((char *)community);
+           session.community = (u_char *)community;
+	   session.peername = peer;
+           session.retries = retries; /* 5 */
+           session.timeout = timeout; /* 1000000L */
+           session.authenticator = NULL;
+
+           snmp_synch_setup(&session);
+
+           ss = snmp_open(&session);
+
+           if (ss == NULL) {
+	      warn("Couldn't open SNMP session");
+           }
+
+           RETVAL = ss;
+	}
+        OUTPUT:
+        RETVAL
+
+
 int
-snmp_setmib(mib_file)
+snmp_setmib(mib_file,force=0)
 	char *		mib_file
+	int		force
 	CODE:
         {
-           if (Mib) Mib = __free_tree(Mib);
+           if (((mib_file != NULL) && (*mib_file != '\0')) || force || !Mib) { 
 
-           fprintf (stderr, "initializing MIB..."); 
-           fflush(stderr);
+              if (Mib) Mib = __free_tree(Mib);
 
-           if ((mib_file == NULL) || (*mib_file == '\0')) {
-              init_mib(); 
-           } else {
-	      Mib = read_mib(mib_file);
+              fprintf (stderr, "initializing MIB..."); 
+              fflush(stderr);
+
+              if ((mib_file == NULL) || (*mib_file == '\0')) {
+                 init_mib(); 
+              } else {
+	         Mib = read_mib(mib_file);
+              }
+
+              if (Mib) {
+                 fprintf(stderr, "done\n");
+              } else {
+                 fprintf(stderr, "failed\n");
+              }
            }
-
-           if (Mib) {
-              fprintf(stderr, "done\n");
-           } else {
-              fprintf(stderr, "failed\n");
-           }
-
            RETVAL = (I32)Mib;
         }
         OUTPUT:
         RETVAL
 
 int
-snmp_set(sess_ref, version, community, peer, retries, timeout, varlist_ref)
+snmp_set(sess_ref, varlist_ref)
         SV *	sess_ref
-        char *	version
-        char *	community
-        char *	peer
-        int	retries
-        int	timeout
         SV *	varlist_ref
 	PPCODE:
 	{
@@ -611,8 +662,7 @@ snmp_set(sess_ref, version, community, peer, retries, timeout, varlist_ref)
 	   I32 varlist_len;
 	   I32 varlist_ind;
 	   I32 varbind_len;
-           struct snmp_session *session;
-           struct snmp_session *ss;
+           SnmpSession *ss;
            struct snmp_pdu *pdu, *response;
            struct variable_list *vars;
            struct variable_list *response_vars;
@@ -620,43 +670,23 @@ snmp_set(sess_ref, version, community, peer, retries, timeout, varlist_ref)
 	   oid *oid_arr;
 	   int oid_arr_len = MAX_NAME_LEN;
            SV *tmp_sv;
+           SV **sess_ptr_sv;
            SV **err_str_sv;
            SV **err_num_sv;
            int status = 0;
            int type;
 
            oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
-           session = (struct snmp_session*)malloc(sizeof(struct snmp_session));
-           memset(session, 0, sizeof(struct snmp_session));
 
-           if (oid_arr && session && SvROK(varlist_ref)) {
+           if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
 
-	      if (strcmp(version, "1") != 0) {
-		fprintf(stderr, "warning: SNMP v1 support only\n");
-	      }
-              session->version = SNMP_VERSION_1;
-              session->community_len = strlen((char *)community);
-              session->community = (u_char *)community;
-	      session->peername = peer;
-              session->retries = retries; /* 5 */
-              session->timeout = timeout; /* 1000000L */
-              session->authenticator = NULL;
-
+              sess_ptr_sv = hv_fetch((HV*)SvRV(sess_ref), "SessPtr", 7, 1);
+	      ss = (SnmpSession *)SvIV((SV*)SvRV(*sess_ptr_sv));
               err_str_sv = hv_fetch((HV*)SvRV(sess_ref), "ErrorStr", 8, 1);
               err_num_sv = hv_fetch((HV*)SvRV(sess_ref), "ErrorNum", 8, 1);
               sv_setpv(*err_str_sv, "");
               sv_setiv(*err_num_sv, 0);
 
-              snmp_synch_setup(session);
-
-              ss = snmp_open(session);
-
-              if (ss == NULL) {
-	        warn("Couldn't open SNMP session");
-                XPUSHs(&sv_undef);
-                PUTBACK;
-	        return;
-              }
               pdu = snmp_pdu_create(SET_REQ_MSG);
 
               varlist = (AV*) SvRV(varlist_ref);
@@ -690,17 +720,13 @@ snmp_set(sess_ref, version, community, peer, retries, timeout, varlist_ref)
 err:
               XPUSHs(&sv_undef); /* no mem or bad args */
            }
+	Safefree(oid_arr);
         }
               
 
 void
-snmp_get(sess_ref, version, community, peer, retries, timeout, retry_nosuch, varlist_ref)
+snmp_get(sess_ref, retry_nosuch, varlist_ref)
         SV *	sess_ref
-        char *	version
-        char *	community
-        char *	peer
-        int	retries
-        int	timeout
         int	retry_nosuch
         SV *	varlist_ref
 	PPCODE:
@@ -713,7 +739,6 @@ snmp_get(sess_ref, version, community, peer, retries, timeout, retry_nosuch, var
 	   I32 varlist_len;
 	   I32 varlist_ind;
 	   I32 varbind_len;
-           struct snmp_session *session;
            struct snmp_session *ss;
            struct snmp_pdu *pdu, *response;
            struct variable_list *vars;
@@ -722,42 +747,22 @@ snmp_get(sess_ref, version, community, peer, retries, timeout, retry_nosuch, var
 	   oid *oid_arr;
 	   int oid_arr_len = MAX_NAME_LEN;
            SV *tmp_sv;
+           SV **sess_ptr_sv;
            SV **err_str_svp;
            SV **err_num_svp;
            int status;
 
            oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
-           session = (struct snmp_session*)malloc(sizeof(struct snmp_session));
-           memset(session, 0, sizeof(struct snmp_session));
 
-           if (oid_arr && session && SvROK(varlist_ref)) {
+           if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
 
-	      if (strcmp(version, "1") != 0) {
-		fprintf(stderr, "warning: SNMP v1 support only\n");
-	      }
-              session->version = SNMP_VERSION_1;
-              session->community_len = strlen((char *)community);
-              session->community = (u_char *)community;
-	      session->peername = peer;
-              session->retries = retries; /* 5 */
-              session->timeout = timeout; /* 1000000L */
-              session->authenticator = NULL;
-
+              sess_ptr_sv = hv_fetch((HV*)SvRV(sess_ref), "SessPtr", 7, 1);
+	      ss = (SnmpSession *)SvIV((SV*)SvRV(*sess_ptr_sv));
               err_str_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorStr", 8, 1);
               err_num_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorNum", 8, 1);
               sv_setpv(*err_str_svp, "");
               sv_setiv(*err_num_svp, 0);
 
-              snmp_synch_setup(session);
-
-              ss = snmp_open(session);
-
-              if (ss == NULL) {
-	        warn("Couldn't open SNMP session");
-                XPUSHs(&sv_undef);
-	        PUTBACK;
-                return;
-              }
               pdu = snmp_pdu_create(GET_REQ_MSG);
 
               varlist = (AV*) SvRV(varlist_ref);
@@ -844,7 +849,8 @@ snmp_get(sess_ref, version, community, peer, retries, timeout, retry_nosuch, var
 			     break;
 
                           case OBJID:
-			     tmp_sv = newSVpv(vars->val.string, vars->val_len);
+			     tmp_sv = 
+				newSVpv((char*)vars->val.string,vars->val_len);
 	                     av_store(varbind, VARBIND_VAL_F, tmp_sv);
                              XPUSHs(sv_mortalcopy(tmp_sv));
 			     break;
@@ -874,16 +880,12 @@ snmp_get(sess_ref, version, community, peer, retries, timeout, retry_nosuch, var
            } else {
               XPUSHs(&sv_undef); /* no mem or bad args */
 	   }
+	Safefree(oid_arr);
 	}
 
 int
-snmp_getnext(sess_ref, version, community, peer, retries, timeout, varlist_ref)
+snmp_getnext(sess_ref, varlist_ref)
         SV *	sess_ref
-        char *	version
-        char *	community
-        char *	peer
-        int	retries
-        int	timeout
         SV *	varlist_ref
 	PPCODE:
 	{
@@ -895,7 +897,6 @@ snmp_getnext(sess_ref, version, community, peer, retries, timeout, varlist_ref)
 	   I32 varlist_len;
 	   I32 varlist_ind;
 	   I32 varbind_len;
-           struct snmp_session *session;
            struct snmp_session *ss;
            struct snmp_pdu *pdu, *response;
            struct variable_list *vars;
@@ -904,6 +905,7 @@ snmp_getnext(sess_ref, version, community, peer, retries, timeout, varlist_ref)
 	   oid *oid_arr;
 	   int oid_arr_len = MAX_NAME_LEN;
            SV *tmp_sv;
+           SV **sess_ptr_sv;
            SV **err_str_svp;
            SV **err_num_svp;
            int status;
@@ -912,37 +914,16 @@ snmp_getnext(sess_ref, version, community, peer, retries, timeout, varlist_ref)
            char *iid;
 
            oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
-           session = (struct snmp_session*)malloc(sizeof(struct snmp_session));
-           memset(session, 0, sizeof(struct snmp_session));
 
-           if (oid_arr && session && SvROK(varlist_ref)) {
+           if (oid_arr && SvROK(sess_ref) && SvROK(varlist_ref)) {
 
-	      if (strcmp(version, "1") != 0) {
-		fprintf(stderr, "warning: SNMP v1 support only\n");
-	      }
-              session->version = SNMP_VERSION_1;
-              session->community_len = strlen((char *)community);
-              session->community = (u_char *)community;
-	      session->peername = peer;
-              session->retries = retries; /* 5 */
-              session->timeout = timeout; /* 1000000L */
-              session->authenticator = NULL;
-
+              sess_ptr_sv = hv_fetch((HV*)SvRV(sess_ref), "SessPtr", 7, 1);
+	      ss = (SnmpSession *)SvIV((SV*)SvRV(*sess_ptr_sv));
               err_str_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorStr", 8, 1);
               err_num_svp = hv_fetch((HV*)SvRV(sess_ref), "ErrorNum", 8, 1);
               sv_setpv(*err_str_svp, "");
               sv_setiv(*err_num_svp, 0);
 
-              snmp_synch_setup(session);
-
-              ss = snmp_open(session);
-
-              if (ss == NULL) {
-	        warn("Couldn't open SNMP session");
-                XPUSHs(&sv_undef);
-	        PUTBACK;
-                return;
-              }
               pdu = snmp_pdu_create(GETNEXT_REQ_MSG);
 
               varlist = (AV*) SvRV(varlist_ref);
@@ -951,16 +932,13 @@ snmp_getnext(sess_ref, version, community, peer, retries, timeout, varlist_ref)
                  varbind_ref = av_fetch(varlist, varlist_ind, 0);
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
-                    
 	            varbind_tag_f = av_fetch(varbind, VARBIND_TAG_F, 0);
 	            varbind_iid_f = av_fetch(varbind, VARBIND_IID_F, 0);
-
-                    if (varbind_tag_f && varbind_iid_f &&
-	                __construct_oid(SvPV(*varbind_tag_f, na), 
-                                        SvPV(*varbind_iid_f, na),
-                                        oid_arr, &oid_arr_len, NULL)) {
-                        snmp_add_null_var(pdu, oid_arr, oid_arr_len);
-                    }
+                    __construct_oid(
+                             (varbind_tag_f ? SvPV(*varbind_tag_f, na) : NULL),
+                             (varbind_iid_f ? SvPV(*varbind_iid_f, na) : NULL),
+                                        oid_arr, &oid_arr_len, NULL);
+                    snmp_add_null_var(pdu, oid_arr, oid_arr_len);
                  } /* if var_ref is ok */
               } /* for all the vars */
 
@@ -1027,7 +1005,8 @@ snmp_getnext(sess_ref, version, community, peer, retries, timeout, varlist_ref)
                           case OBJID:
 /* when an objid is fetched it is already stored as array of native longs */
 /* therefor these values need to be unpacked like "unpack("I*", $val)"    */
-			     tmp_sv = newSVpv(vars->val.string, vars->val_len);
+			     tmp_sv = 
+				newSVpv((char*)vars->val.string,vars->val_len);
 	                     av_store(varbind, VARBIND_VAL_F, tmp_sv);
                              XPUSHs(sv_mortalcopy(tmp_sv));
 			     break;
@@ -1059,6 +1038,7 @@ err:
            } else {
               XPUSHs(&sv_undef); /* no mem or bad args */
 	   }
+	Safefree(oid_arr);
 	}
 
 char *
@@ -1079,4 +1059,13 @@ snmp_translate(var,mode)
            else
               sv_setsv( ST(0), &sv_undef);
 	}
+
+
+MODULE = SNMP	PACKAGE = SnmpSessionPtr	PREFIX = sess_
+void
+sess_DESTROY(sess_ptr)
+	SnmpSession *sess_ptr
+	CODE:
+	  /* printf("Now in SnmpSessionPtr::DESTROY\n"); */
+          snmp_close( sess_ptr );
 

@@ -10,6 +10,15 @@ getting back and unpack accordingly.
 I think the error handling is fixed now - but it could use some
 validation/going over. See that informative strings are returned and the
 the error number is useful in all cases.
+(  Hi Joe,
+
+   I'm confused as to what is returned by
+   SNMP::Session::set.  For success and failure
+   I get 0, although ErrorStr contains a message
+   on failure.
+
+   Jacques Vidrine <nectar@communique.net>               Communique, Inc.
+)
 
 implement an asynchronous interface so multiple requests can be sent out
 and responses can be handled with a call-back.
@@ -17,7 +26,8 @@ and responses can be handled with a call-back.
 implement more v2-isms. (assuming some stability and consensus on what
 that is)
 
-
+Achim
+Btw. On top of my wish list is making SNMP work with -w.
 
 
 

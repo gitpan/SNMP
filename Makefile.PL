@@ -1,5 +1,5 @@
 use ExtUtils::MakeMaker;
-require 5.001;
+require 5;
 
 # See lib/ExtUtils/MakeMaker.pm for details of how to influence
 # the contents of the Makefile that is written.
@@ -11,7 +11,7 @@ WriteMakefile(%MakeParams);
 sub InitMakeParams {
 my %Params = (
     'NAME'	=> 'SNMP',
-    'VERSION'	=> '1.5b',
+    'VERSION'	=> 1.6,
     'dist'      => { SUFFIX => "gz", COMPRESS => "gzip -9f"},
 	    );
 my @IncludeFiles = qw[asn1.h parse.h snmp.h snmp_api.h 
@@ -45,4 +45,5 @@ sub find_files {
 	}
     }
 }
+
 

@@ -1,14 +1,15 @@
 package SNMP;
+$VERSION = 1.6;   # current release version number
 
 require Exporter;
 require DynaLoader;
 require AutoLoader;
 
-@ISA = qw(Exporter Autoloader DynaLoader);
+@SNMP::ISA = qw(Exporter AutoLoader DynaLoader);
 # Items to export into callers namespace by default. Note: do not export
 # names by default without a very good reason. Use EXPORT_OK instead.
 # Do not simply export all your public functions/methods/constants.
-@EXPORT = qw(
+@SNMP::EXPORT = qw(
 	RECEIVED_MESSAGE
 	SNMPERR_BAD_ADDRESS
 	SNMPERR_BAD_LOCPORT
@@ -33,7 +34,7 @@ sub AUTOLOAD {
     # This AUTOLOAD is used to 'autoload' constants from the constant()
     # XS function.  If a constant is not found then control is passed
     # to the AUTOLOAD in AutoLoader.
-
+    my($val,$pack,$file,$line);
     local($constname);
     ($constname = $AUTOLOAD) =~ s/.*:://;
     $val = constant($constname, @_ ? $_[0] : 0);
@@ -55,14 +56,13 @@ sub AUTOLOAD {
 bootstrap SNMP;
 
 # Preloaded methods go here.
-$release ="1.5b";   # current release version number
 $auto_init_mib = 1; # set to true, mib is loaded on session creation
                     # set to zero(0) for manual control
 
 sub setMib {
 # re-initializes mib with file name provided
-   my $file = shift;
-   SNMP::_setmib($file);
+   my ($file,$force) = @_;
+   SNMP::_setmib($file,$force);
 }
 
 sub translateObj {
@@ -96,26 +96,34 @@ sub new {
    # v1 or v2, defaults to v1
    $this->{Version} ||= 1;
 
-   #community defaults to public 
+   # destination host defaults to localhost
+   $this->{DestHost} ||= 'localhost';
+
+   # community defaults to public 
    $this->{Community} ||= 'public'; 
 
-   #number of retries before giving up, defaults to SNMP_DEFAULT_RETRIES
+   # number of retries before giving up, defaults to SNMP_DEFAULT_RETRIES
    $this->{Retries} = SNMP::SNMP_DEFAULT_RETRIES() unless defined($this->{Retries});
 
-   #timeout before retry, defaults to SNMP_DEFAULT_TIMEOUT
+   # timeout before retry, defaults to SNMP_DEFAULT_TIMEOUT
    $this->{Timeout} = SNMP::SNMP_DEFAULT_TIMEOUT() unless defined($this->{Timeout});
 
-   #convert to dotted ip addr if needed 
-#   if ($this->{DestHost} =~ /[0-255]\.[0-255]\.[0-255]\.[0-255]/) {
+   # convert to dotted ip addr if needed 
    if ($this->{DestHost} =~ /\d+\.\d+\.\d+\.\d+/) {
-      $this->{DestAddr} = $this->{DestHost};
-   } elsif (defined($this->{DestHost})) {
-     ($name, $aliases, $type, $len, $thisaddr) = 
-        gethostbyname($this->{DestHost});
-      $this->{DestAddr} = join('.', unpack("C4", $thisaddr));
+     $this->{DestAddr} = $this->{DestHost};
    } else {
-     warn("undefined destination host!");
+     ($name, $aliases, $type, $len, $thisaddr) = 
+       gethostbyname($this->{DestHost});
+     $this->{DestAddr} = join('.', unpack("C4", $thisaddr));
    }
+   warn("undefined destination address!") unless $this->{DestAddr};
+
+   $this->{SessPtr} = SNMP::_new_session($this->{Version},
+					 $this->{Community},
+					 $this->{DestAddr},
+					 $this->{Retries},
+					 $this->{Timeout},
+					);
 
    SNMP::setMib() if $SNMP::auto_init_mib;
 
@@ -136,19 +144,12 @@ sub set {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
-     $val = shift;
+     my ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
+     my $val = shift;
      $varbind_list_ref = [[$tag, $iid, $val]];
    }
   
-   $res = SNMP::_set($this,
-		     $this->{Version},
-		     $this->{Community},
-		     $this->{DestAddr},
-		     $this->{Retries},
-		     $this->{Timeout},
-		     $varbind_list_ref
-		    );
+   $res = SNMP::_set($this, $varbind_list_ref);
 
 }
 
@@ -166,19 +167,11 @@ sub get {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
+     my ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
      $varbind_list_ref = [[$tag, $iid]];
    }
   
-   @res = SNMP::_get($this,
-		     $this->{Version},
-		     $this->{Community},
-		     $this->{DestAddr},
-		     $this->{Retries},
-		     $this->{Timeout},
-		     $this->{RetryNoSuch},
-		     $varbind_list_ref
-		    );
+   @res = SNMP::_get($this, $this->{RetryNoSuch}, $varbind_list_ref);
 
    return(wantarray() ? @res : $res[0]);
 }
@@ -196,19 +189,11 @@ sub getnext {
      $varbind_list_ref = [$vars];
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    } else {
-     ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
-     $val = shift;
-     $varbind_list_ref = [[$tag, $iid, $val]];
+     my ($tag, $iid) = ($vars =~ /^(\w+)\.(.*)$/);
+     $varbind_list_ref = [[$tag, $iid]];
    }
   
-   @res = SNMP::_getnext($this,
-		     $this->{Version},
-		     $this->{Community},
-		     $this->{DestAddr},
-		     $this->{Retries},
-		     $this->{Timeout},
-		     $varbind_list_ref
-		    );
+   @res = SNMP::_getnext($this, $varbind_list_ref);
 
    return(wantarray() ? @res : $res[0]);
 }
@@ -231,7 +216,7 @@ package SNMP::VarList;
 sub new {
    my $type = shift;
    my $this = [];
-
+   my $varb;
    foreach $varb (@_) {
      $varb = new SNMP::Varbind($varb) unless ref($varb) =~ /SNMP::Varbind/;
      push(@{$this}, $varb);
@@ -242,7 +227,7 @@ sub new {
 
 package SNMP;
 
-# Autoload methods go after __END__, and are processed by the autosplit program.
+# Autoload methods go after __END__, and are processed by the autosplit prog.
 
 1;
 __END__

@@ -6,5 +6,9 @@ README
 SNMP.pm
 SNMP.xs
 TODO
-test/mib.txt
-test/snmptest.pl
+typemap
+test.pl
+mib.txt
+examp/snmpwalk.pl
+examp/testleak.pl
+hints/solaris.pl
