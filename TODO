@@ -1,35 +1,32 @@
-allow argument to set/get/getNext to be a numeric OID in addition to a
-'tag.iid'. if the input arg is a numeric OID then getNext would return a
-numeric OID as well.
+Improve asyncronous interface. probably should make an
+SNMP::snmp_callback which can be installed with Tk's fileevent or a
+general select loop (and/or Event module) This would really be easier
+and more reliable/compatible if/when event handling is moved to the
+perl core. 
 
-add a 'getType' method to lookup SNMP type(syntax) for a given object so
-some formatting of retrieved value can be done for packed types like
-(OCT_STR, IP_ADDR, OID etc.) currently you must know what type you are
-getting back and unpack accordingly.
+look for *Not Implemeted* and implement :)
+
+allow unloading and reinitialization of parsed MIB - write access to
+mib tree (change to ucd-snmp?)
+
+allow MIB use on a per Session basis (ie. dependent on agent type and
+version, loaded mib might be different (yes I know properly designed
+mibs should eliminate the need for this but not all mibs are well
+behaved))
 
 I think the error handling is fixed now - but it could use some
-validation/going over. See that informative strings are returned and the
-the error number is useful in all cases.
-(  Hi Joe,
+validation/going over. See that informative strings are returned and
+the the error number is useful in all cases. the 'set' method needs to
+be improved wrt error results - it should return 'undef' for all
+errors and store the error num/string in the
+$session->{ErrNum/ErrString}
 
-   I'm confused as to what is returned by
-   SNMP::Session::set.  For success and failure
-   I get 0, although ErrorStr contains a message
-   on failure.
+implement v2 traps and v3 sessions? (use ucd-snmp-v3 release)
 
-   Jacques Vidrine <nectar@communique.net>               Communique, Inc.
-)
+ensure module does not complain with -w.
 
-implement an asynchronous interface so multiple requests can be sent out
-and responses can be handled with a call-back.
+add more tests
 
-implement more v2-isms. (assuming some stability and consensus on what
-that is)
-
-- Wish: would be nice if you could add a make test target
-
-Achim
-Btw. On top of my wish list is making SNMP work with -w.
-
+add POD docs to SNMP.pm (I have some patches around someplace for this)
 
 
