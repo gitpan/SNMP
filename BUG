@@ -1,0 +1,14 @@
+
+1) Memory leak (have not seen this lately)
+
+The following snippet used to grow in memory (and may still) - please
+notify me if anyone still observes this and even better has a fix.
+
+perl -le '
+use SNMP;
+$obj = new SNMP::Session DestHost, "dubravka";
+while (){
+print $obj->get(["ifNumber",0]);
+}
+'
+
