@@ -1273,6 +1273,19 @@ snmp_add_mib_dir(mib_dir,force=0)
         OUTPUT:
         RETVAL
 
+void
+snmp_init_mib_internals()
+	CODE:
+        {
+        int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
+
+        /* should test better to see if it has been done already */
+	if (Mib == NULL) {
+           if (verbose) warn("initializing MIB internals (empty)\n");
+           init_mib_internals();
+        }
+        }
+
 
 int
 snmp_read_mib(mib_file, force=0)
@@ -2299,7 +2312,8 @@ snmp_mib_node_FETCH(tp_ref, key)
                  XPUSHs(sv_2mortal(newSVpv(str_buf,0)));
                  XPUSHs(sv_2mortal(newSViv((IV)tp)));
                  PUTBACK ;
-                 pp_tie(ARGS);
+                 perl_call_pv("SNMP::_tie",G_VOID);
+                 /* pp_tie(ARGS); */
                  SPAGAIN ;
                  FREETMPS ;
                  LEAVE ;
@@ -2327,7 +2341,8 @@ snmp_mib_node_FETCH(tp_ref, key)
                        XPUSHs(sv_2mortal(newSVpv(str_buf,0)));
                        XPUSHs(sv_2mortal(newSViv((IV)tp)));
                        PUTBACK ;
-                       pp_tie(ARGS);
+                       perl_call_pv("SNMP::_tie",G_VOID);
+                       /* pp_tie(ARGS); */
                        SPAGAIN ;
                        FREETMPS ;
                        LEAVE ;
@@ -2361,7 +2376,8 @@ snmp_mib_node_FETCH(tp_ref, key)
                  XPUSHs(sv_2mortal(newSVpv(str_buf,0)));
                  XPUSHs(sv_2mortal(newSViv((IV)tp)));
                  PUTBACK ;
-                 pp_tie(ARGS);
+                 perl_call_pv("SNMP::_tie",G_VOID);
+                 /* pp_tie(ARGS); */
                  SPAGAIN ;
                  FREETMPS ;
                  LEAVE ;

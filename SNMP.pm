@@ -108,7 +108,13 @@ sub setMib {
 sub initMib {
 # eqivalent to calling the snmp library init_mib if Mib is NULL
 # if Mib is already loaded this function does nothing
-  SNMP::_read_mib("");
+# Pass a zero valued argument to get minimal mib tree initialzation
+# If non zero agrgument or no argument then full mib initialization
+  if (defined $_[0] and $_[0] == 0) {
+    SNMP::_init_mib_internals();
+  } else {
+    SNMP::_read_mib("");
+  }
 }
 
 sub addMibDirs {
@@ -269,6 +275,20 @@ sub MainLoop {
     SNMP::_main_loop($time_sec,$time_usec,$callback);
 }
 
+sub _tie {
+# this is a little implementation hack so ActiveState can access pp_tie
+# thru perl code. All other environments allow the calling of pp_tie from
+# XS code but AS was not exporting it when PERL_OBJECT was used.
+#
+# short term solution was call this perl func which calls 'tie'
+#
+# longterm fix is to supply a patch which allows AS to export pp_tie in 
+# such a way that it can be called from XS code. gsarathy says:
+# a patch to util.c is needed to provide access to PL_paddr
+# so it is possible to call PL_paddr[OP_TIE] as the compiler does
+    tie($_[0],$_[1],$_[2],$_[3]);
+}
+
 package SNMP::Session;
 
 sub new {
@@ -325,7 +345,7 @@ sub new {
 
    return undef unless $this->{SessPtr};
 
-   SNMP::initMib() if $SNMP::auto_init_mib; # ensures that *some* mib is loaded
+   SNMP::initMib($SNMP::auto_init_mib); # ensures that *some* mib is loaded
 
    $this->{UseLongNames} ||= $SNMP::use_long_names;
    $this->{UseSprintValue} ||= $SNMP::use_sprint_value;
