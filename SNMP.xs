@@ -1145,8 +1145,9 @@ BOOT:
 # first blank line terminates bootstrap code
 SOCK_STARTUP;
 Mib = 0;
+snmp_set_do_debugging(0); /* overrides lib dflt - silence init_mib_internals */
 snmp_set_quick_print(1);
-init_mib_internals();
+#init_mib_internals();
 
 double
 constant(name,arg)
@@ -1286,7 +1287,7 @@ snmp_read_mib(mib_file, force=0)
         if ((mib_file == NULL) || (*mib_file == '\0')) {
            if (Mib == NULL) {
               if (verbose) warn("initializing MIB\n");
-                 init_mib();
+              init_mib();
               if (Mib) {
                  if (verbose) warn("done\n");
               } else {
@@ -1295,6 +1296,7 @@ snmp_read_mib(mib_file, force=0)
 	   }
         } else {
            if (verbose) warn("reading MIB: %s\n", mib_file);
+           if (Mib == NULL) init_mib_internals();
            if (strcmp("ALL",mib_file))
               Mib = read_mib(mib_file);
            else
@@ -1317,6 +1319,7 @@ snmp_read_module(module)
 	CODE:
         {
         int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
+	if (Mib == NULL)     init_mib_internals();
 
         if (!strcmp(module,"ALL")) {
            Mib = read_all_mibs();
@@ -2324,7 +2327,7 @@ snmp_mib_node_FETCH(tp_ref, key)
                        XPUSHs(sv_2mortal(newSVpv(str_buf,0)));
                        XPUSHs(sv_2mortal(newSViv((IV)tp)));
                        PUTBACK ;
-                       pp_tie();
+                       pp_tie(ARGS);
                        SPAGAIN ;
                        FREETMPS ;
                        LEAVE ;
@@ -2358,7 +2361,7 @@ snmp_mib_node_FETCH(tp_ref, key)
                  XPUSHs(sv_2mortal(newSVpv(str_buf,0)));
                  XPUSHs(sv_2mortal(newSViv((IV)tp)));
                  PUTBACK ;
-                 pp_tie();
+                 pp_tie(ARGS);
                  SPAGAIN ;
                  FREETMPS ;
                  LEAVE ;

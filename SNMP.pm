@@ -264,8 +264,8 @@ sub snmp_trap {
 sub MainLoop {
     my $time = shift;
     my $callback = shift;
-    my $time_sec = int $time;
-    my $time_usec = int(($time-$time_sec)*1000000);
+    my $time_sec = ($time ? int $time : 0);
+    my $time_usec = ($time ? int(($time-$time_sec)*1000000) : 0);
     SNMP::_main_loop($time_sec,$time_usec,$callback);
 }
 
