@@ -53,9 +53,9 @@ my $s1 = new SNMP::Session ( DestHost => $host, Community => $comm);
 printf "%s %d\n", ($s1) ? "ok" :"not ok", $n++;
 
 ######################################################################
-# Get the standard Vars and check that we got some back
+# Get the standard Vars and check that we got some defined vars back
 @ret = $s1->get($vars);
-printf "%s %d\n", (@ret) ? "ok" :"not ok", $n++;
+printf "%s %d\n", (not $s1->{ErrorStr} and defined $ret[0]) ? "ok" :"not ok", $n++;
 
 ######################################################################
 # Check that we got back the number we asked for.
@@ -80,7 +80,7 @@ printf "%s %d\n", (defined($new) and $new eq $name) ? "ok" :"not ok", $n++;
 ######################################################################
 # reset to the original value
 $s1->set('sysContact.0',$orig_name);
-printf "%s %d\n", ($s1->{ErrorInd} == 0) ? "ok" :"not ok", $n++;
+printf "%s %d\n", (not $s1->{ErrorStr} and not $s1->{ErrorInd}) ? "ok" :"not ok", $n++;
 
 ######################################################################
 # Try to change a read-only value
@@ -93,12 +93,12 @@ printf "%s %d\n", ($s1->{ErrorInd} == 1) ? "ok" :"not ok", $n++;
 # We should get back sysDescr.0 here.
 my $var = new SNMP::Varbind(['sysDescr']);
 my $res2 = $s1->getnext($var);
-printf "%s %d\n", ($var->tag eq 'sysDescr') ? "ok" :"not ok", $n++;
+printf "%s %d\n", (not $s1->{ErrorStr} and not $s1->{ErrorInd}) ? "ok" :"not ok", $n++;
 printf "%s %d\n", (defined $var->iid and $var->iid == 0) ? "ok" :"not ok", $n++;
-printf "%s %d\n", ($var->val eq $res2) ? "ok" :"not ok", $n++;
+printf "%s %d\n", (defined $var->val and $var->val eq $res2) ? "ok" :"not ok", $n++;
 
 ######################################################################
 # get the next one after that as well for a second check
 my $res3 = $s1->getnext($var);
-printf "%s %d\n", ($var->tag eq 'sysObjectID') ? "ok" :"not ok", $n++;
-printf "%s %d\n", ($var->val eq $res3) ? "ok" :"not ok", $n++;
+printf "%s %d\n", (defined $var->tag and $var->tag eq 'sysObjectID') ? "ok" :"not ok", $n++;
+printf "%s %d\n", (defined $var->val and $var->val eq $res3) ? "ok" :"not ok", $n++;

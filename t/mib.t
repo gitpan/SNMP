@@ -44,3 +44,4 @@ $res = SNMP::setMib($mib_file,0);
 printf "%s %d\n", ($res) ? "ok" :"not ok", $n++;
 
 
+

@@ -32,10 +32,10 @@ if ($Config{'osname'} eq 'MSWin32') {
     $sep = '/';
 }
 my $inc_path1 = "${sep}usr${sep}include";
-my $inc_path2 = "${sep}usr${sep}local${sep}include";
+my $inc_path2 = "${sep}usr${sep}local${sep}snmpv3${sep}include";
 my $inc_path3 = "${inc_path2}${sep}ucd-snmp";
 my $lib_path1 = "${sep}usr${sep}lib";
-my $lib_path2 = "${sep}usr${sep}local${sep}lib";
+my $lib_path2 = "${sep}usr${sep}local${sep}snmpv3${sep}lib";
 
 my @IncludeFiles = qw[asn1.h mib.h parse.h snmp.h snmp_api.h 
 		      snmp_client.h snmp_impl.h];

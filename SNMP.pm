@@ -7,7 +7,7 @@
 #     modify it under the same terms as Perl itself.
 
 package SNMP;
-$VERSION = '1.8.1';   # current release version number
+$VERSION = '3.0.0b1';   # current release version number
 
 require Exporter;
 require DynaLoader;
@@ -76,6 +76,8 @@ tie $SNMP::debugging, SNMP::DEBUGGING;
 tie $SNMP::dump_packet, SNMP::DUMP_PACKET;
 tie %SNMP::MIB, SNMP::MIB;
 tie $SNMP::save_descriptions, SNMP::MIB::SAVE_DESCR;
+
+%SNMP::V3_SEC_LEVEL_MAP = (noAuthNoPriv => 1, authNoPriv => 2, authPriv =>3);
 
 $auto_init_mib = 1; # enable automatic MIB loading at session creation time
 $use_long_names = 0; # non-zero to prefer longer mib textual identifiers rather
@@ -201,7 +203,8 @@ sub mapEnum {
       $tag = $var;
       $val = shift;
   }
-  my $res = SNMP::_map_enum($tag, $val, $val =~ /^\d+$/);
+  my $iflag = $val =~ /^\d+$/;
+  my $res = SNMP::_map_enum($tag, $val, $iflag);
   if ($update and defined $res) { $var->[$SNMP::Varbind::val_f] = $res; }
   return($res);
 }
@@ -342,15 +345,48 @@ sub new {
 	 return undef;
      }
    }
+   
+   if ($this->{Version} == 1 or $this->{Version} == 2) {
+       $this->{SessPtr} = SNMP::_new_session($this->{Version},
+					     $this->{Community},
+					     $this->{DestAddr},
+					     $this->{RemotePort},
+					     $this->{Retries},
+					     $this->{Timeout},
+					     );
+   } elsif ($this->{Version} == 3 ) {
+       $this->{SecName} ||= 'initial';
+       $this->{SecLevel} ||= 'noAuthNoPriv';
+       $this->{SecLevel} = $SNMP::V3_SEC_LEVEL_MAP{$this->{SecLevel}}
+          if $this->{SecLevel} !~ /^\d+$/;
+#       $this->{SecEngineId};
+       $this->{ContextEngineId} ||= $this->{SecEngineId};
+       $this->{Context} ||= '';
+       $this->{AuthProto} ||= 'MD5';
+#       $this->{AuthPass};
+       $this->{PrivProto} ||= 'DES';
+#       $this->{PrivPass};
+#       $this->{EngineBoots};
+#       $this->{EngineTime};
 
-   $this->{SessPtr} = SNMP::_new_session($this->{Version},
-					 $this->{Community},
-					 $this->{DestAddr},
-					 $this->{RemotePort},
-					 $this->{Retries},
-					 $this->{Timeout},
-					);
-
+       $this->{SessPtr} = SNMP::_new_v3_session($this->{Version},
+						$this->{DestAddr},
+						$this->{RemotePort},
+						$this->{Retries},
+						$this->{Timeout},
+						$this->{SecName},
+						$this->{SecLevel},
+						$this->{SecEngineId},
+						$this->{ContextEngineId},
+						$this->{Context},
+						$this->{AuthProto},
+						$this->{AuthPass},
+						$this->{PrivProto},
+						$this->{PrivPass},
+						$this->{EngineBoots},
+						$this->{EngineTime},
+						);
+   }
    return undef unless $this->{SessPtr};
 
    SNMP::initMib($SNMP::auto_init_mib); # ensures that *some* mib is loaded
