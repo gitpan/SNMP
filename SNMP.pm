@@ -2,12 +2,12 @@
 #
 # written by G. S. Marzot (gmarzot@nortelnetworks.com)
 #
-#     Copyright (c) 1995-1999 G. S. Marzot. All rights reserved.
+#     Copyright (c) 1995-2000 G. S. Marzot. All rights reserved.
 #     This program is free software; you can redistribute it and/or
 #     modify it under the same terms as Perl itself.
 
 package SNMP;
-$VERSION = '3.1.0b1';   # current release version number
+$VERSION = '3.1.0';   # current release version number
 
 require Exporter;
 require DynaLoader;
@@ -130,16 +130,18 @@ sub initMib {
 sub addMibDirs {
 # adds directories to search path when a module is requested to be loaded
   foreach (@_) {
-    SNMP::_add_mib_dir($_);
+    SNMP::_add_mib_dir($_) or return undef;
   }
+  return 1;
 }
 
 sub addMibFiles {
 # adds mib definitions to currently loaded mib database from
 # file(s) supplied
   foreach (@_) {
-    SNMP::_read_mib($_);
+    SNMP::_read_mib($_) or return undef;
   }
+  return 1;
 }
 
 sub loadModules {
@@ -147,8 +149,9 @@ sub loadModules {
 # Modules will be searched from previously defined mib search dirs
 # Passing and arg of 'ALL' will cause all known modules to be loaded
    foreach (@_) {
-     SNMP::_read_module($_);
+     SNMP::_read_module($_) or return undef;
    }
+   return 1;
 }
 
 sub unloadModules {
@@ -438,7 +441,7 @@ sub new {
    $this->{UseSprintValue} ||= $SNMP::use_sprint_value;
    $this->{UseEnums} ||= $SNMP::use_enums;
 
-   bless $this;
+   bless $this, $type;
 }
 
 sub update {
@@ -645,68 +648,6 @@ sub getbulk {
    return(wantarray() ? @res : $res[0]);
 }
 
-package SNMP::TrapSession;
-
-sub new {
-   my $type = shift;
-   my $this = {};
-   my ($name, $aliases, $host_type, $len, $thisaddr);
-
-   %$this = @_;
-
-   $this->{ErrorStr} = ''; # if methods return undef check for expln.
-   $this->{ErrorNum} = 0;  # contains SNMP error return
-
-   # v1 or v2, defaults to v1
-   $this->{Version} ||= 1;
-
-   # allow override of remote SNMP trap port
-   $this->{RemotePort} ||= 162;
-
-   # destination host defaults to localhost
-   $this->{DestHost} ||= 'localhost';
-
-   # community defaults to public
-   $this->{Community} ||= 'public';
-
-   # number of retries before giving up, defaults to SNMP_DEFAULT_RETRIES
-   $this->{Retries} = SNMP::SNMP_DEFAULT_RETRIES() unless defined($this->{Retries});
-
-   # timeout before retry, defaults to SNMP_DEFAULT_TIMEOUT
-   $this->{Timeout} = SNMP::SNMP_DEFAULT_TIMEOUT() unless defined($this->{Timeout});
-
-   # convert to dotted ip addr if needed
-   if ($this->{DestHost} =~ /\d+\.\d+\.\d+\.\d+/) {
-     $this->{DestAddr} = $this->{DestHost};
-   } else {
-     if (($name, $aliases, $host_type, $len, $thisaddr) =
-	 gethostbyname($this->{DestHost})) {
-	 $this->{DestAddr} = join('.', unpack("C4", $thisaddr));
-     } else {
-	 warn("unable to resolve destination address($this->{DestHost}!")
-	     if $SNMP::verbose;
-	 return undef;
-     }
-   }
-
-   $this->{SessPtr} = SNMP::_new_session($this->{Version},
-					 $this->{Community},
-					 $this->{DestAddr},
-					 $this->{RemotePort},
-					 $this->{Retries},
-					 $this->{Timeout},
-					);
-
-   return undef unless $this->{SessPtr};
-
-   SNMP::initMib() if $SNMP::auto_init_mib; # ensures that *some* mib is loaded
-
-   $this->{UseLongNames} ||= $SNMP::use_long_names;
-   $this->{UseSprintValue} ||= $SNMP::use_sprint_value;
-   $this->{UseEnums} ||= $SNMP::use_enums;
-
-   bless $this;
-}
 
 %trap_type = (coldStart => 0, warmStart => 1, linkDown => 2, linkUp => 3,
 	      authFailure => 4, egpNeighborLoss => 5, specific => 6 );
@@ -719,13 +660,14 @@ sub trap {
 #             uptime => 1234,       # default to localhost uptime (0 on win32)
 #             [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
 #                                                          # always last
-# (v2) srcParty, dstParty, oid, uptime, <vars>
-# $sess->trap(srcParty => party1,
-#             dstParty => party2,
+# (v2) oid, uptime, <vars>
+# $sess->trap(uptime => 1234,
 #             oid => 'snmpRisingAlarm',
-#             uptime => 1234,
 #             [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
 #                                                          # always last
+#                                                          # always last
+
+
    my $this = shift;
    my $vars = pop if ref($_[$#_]); # last arg may be varbind or varlist
    my %param = @_;
@@ -751,18 +693,61 @@ sub trap {
        my $specific = $param{specific} || 0;
        @res = SNMP::_trapV1($this, $enterprise, $agent, $generic, $specific,
 			  $uptime, $varbind_list_ref);
-   } else {
-       my $dstParty = $param{dstParty};
-       my $srcParty = $param{srcParty};
-       my $oid = $param{oid};
-       my $uptime = $param{uptime};
-       @res = SNMP::_trapV2($this, $dstParty, $srcParty, $oid,
-			  $uptime, $varbind_list_ref);
+   } elsif  (($this->{Version} eq '2')|| ($this->{Version} eq '2c')) {
+       my $trap_oid = $param{oid} || $param{trapoid} || '.0.0';
+       my $uptime = $param{uptime} || SNMP::_sys_uptime();
+       @res = SNMP::_trapV2($this, $uptime, $trap_oid, $varbind_list_ref);
    }
 
    return(wantarray() ? @res : $res[0]);
 }
 
+sub inform {
+# (v3) oid, uptime, <vars>
+# $sess->inform(uptime => 1234,
+#             oid => 'coldStart',
+#             [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
+#                                                          # always last
+
+
+   my $this = shift;
+   my $vars = pop if ref($_[$#_]); # last arg may be varbind or varlist
+   my %param = @_;
+   my ($varbind_list_ref, @res);
+
+   if (ref($vars) =~ /SNMP::VarList/) {
+     $varbind_list_ref = $vars;
+   } elsif (ref($vars) =~ /SNMP::Varbind/) {
+     $varbind_list_ref = [$vars];
+   } elsif (ref($vars) =~ /ARRAY/) {
+     $varbind_list_ref = [$vars];
+     $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
+   }
+
+   my $trap_oid = $param{oid} || $param{trapoid};
+   my $uptime = $param{uptime} || SNMP::_sys_uptime();
+   if($this->{Version} eq '3') {
+     @res = SNMP::_inform($this, $uptime, $trap_oid, $varbind_list_ref);
+   } else {
+     warn("error:inform: This version doesn't support the command\n");
+   }
+
+   return(wantarray() ? @res : $res[0]);
+}
+
+package SNMP::TrapSession;
+@ISA = ('SNMP::Session');
+
+sub new {
+   my $type = shift;
+
+   # allow override of remote SNMP trap port
+   unless (grep(/RemotePort/, @_)) {
+       push(@_, 'RemotePort', 162); # push on new default for trap session
+   }
+
+   SNMP::Session::new($type, @_);
+}
 
 package SNMP::Varbind;
 
@@ -953,15 +938,27 @@ __END__
 
 =head1 NAME
 
-SNMP - The Perl5 'SNMP' Extension Module v3.0.0b1 for the UCD SNMPv3 Library
+SNMP - The Perl5 'SNMP' Extension Module v3.1.0 for the UCD SNMPv3 Library
 
 =head1 SYNOPSIS
 
  use SNMP;
-
- $sess = new SNMP::Session(...);
- $sess->get();
  ...
+ $sess = new SNMP::Session(DestHost => localhost, Community => public);
+ $val = $sess->get('sysDescr.0');
+ ...
+ $vars = new SNMP::VarList([sysDescr,0], [sysContact,0], [sysLocation,0]);
+ @vals = $sess->get($vars);
+ ...
+ $vb = new SNMP::Varbind();
+ do {
+    $val = $sess->getnext($vb);
+    print "@{$vb}\n";
+ until ($sess->{ErrorNum});
+ ...
+ $SNMP::save_descriptions = 1;
+ SNMP::initMib(); # assuming mib is not already loaded
+ print "$SNMP::MIB{sysDescr}{description}\n";
 
 =head1 DESCRIPTION
 
@@ -1180,7 +1177,11 @@ will operate asyncronously
 
 =item $sess->getbulk(E<lt>non-repeatersE<gt>, E<lt>max-repeatersE<gt>, E<lt>varsE<gt>)
 
-B<* Not Implemented *>
+do an SNMP GETBULK, from the list of Varbinds, the single
+next lexico instance is fetched for the first n Varbinds
+as defined by <non-repeaters>. For remaining Varbinds,
+the m lexico instances are retrieved each of the remaining
+Varbinds, where m is <max-repeaters>.
 
 =back
 
@@ -1205,11 +1206,9 @@ supports all applicable fields from SNMP::Session
                 [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
                                                              # always last
 
-=item trap(srcParty, dstParty, oid, uptime, <vars>) - v2 format - B<* Not Implemented *>
+=item trap(oid, uptime, <vars>) - v2 format
 
-    $sess->trap(srcParty => party1,
-                dstParty => party2,
-                oid => 'snmpRisingAlarm',
+    $sess->trap(oid => 'snmpRisingAlarm',
                 uptime => 1234,
                 [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
                                                              # always last
@@ -1405,7 +1404,7 @@ interupted. If <timeout(sic)
 
 =item $SNMP::VERSION
 
-the current version specifier (e.g., 3.0)
+the current version specifier (e.g., 3.1.0)
 
 =item $SNMP::auto_init_mib
 
@@ -1740,7 +1739,6 @@ feedback.
  Michael Slifcak
  Perl5 Porters
 
-
 Apologies to any/all who's patch/feature/request was not mentioned or
 included - most likely it was lost when paying work intruded on my
 fun. Please try again if you do not see a desired feature. This may
@@ -1753,7 +1751,7 @@ bugs, comments, questions to gmarzot@nortelnetworks.com
 
 =head1 Copyright
 
-     Copyright (c) 1995-1999 G. S. Marzot. All rights reserved.
+     Copyright (c) 1995-2000 G. S. Marzot. All rights reserved.
      This program is free software; you can redistribute it and/or
      modify it under the same terms as Perl itself.
 
