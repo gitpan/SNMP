@@ -1,32 +1,40 @@
-Improve asyncronous interface. probably should make an
-SNMP::snmp_callback which can be installed with Tk's fileevent or a
-general select loop (and/or Event module) This would really be easier
-and more reliable/compatible if/when event handling is moved to the
-perl core. 
+enhance make test
 
-look for *Not Implemeted* and implement :)
+implement v2 traps and v3 inform requests.
 
-allow unloading and reinitialization of parsed MIB - write access to
-mib tree (change to ucd-snmp?)
+solidify/enhance the V3 api
 
-allow MIB use on a per Session basis (ie. dependent on agent type and
-version, loaded mib might be different (yes I know properly designed
-mibs should eliminate the need for this but not all mibs are well
-behaved))
+handle TCP sessions
 
-I think the error handling is fixed now - but it could use some
-validation/going over. See that informative strings are returned and
-the the error number is useful in all cases. the 'set' method needs to
-be improved wrt error results - it should return 'undef' for all
-errors and store the error num/string in the
-$session->{ErrNum/ErrString}
+See that informative strings are returned and the the error number is
+useful in all cases. (need to set $! for errors where a session is not
+returned (failed engineId discovery, memory alloc error, failed key
+computation?))
 
-implement v2 traps and v3 sessions? (use ucd-snmp-v3 release)
+PC and other unix builds - any platform issues
+
+building with shared libs
 
 ensure module does not complain with -w.
 
-add more tests
+enhance async api so that a boolean false return from a callback exits
+the MainLoop
 
-add POD docs to SNMP.pm (I have some patches around someplace for this)
+enhance async api to store a reference to the perl SNMP::Sesion object
+for 2 reasons: 1) if the initial calling session goes out of scope we
+won't destroy the C-struct session until the callback is called. 2) it
+allows us to set error codes in the perl SNMP::Session object
 
+see if new async hooks play with Event.pm
+
+handle dynamic changes to Session parameters, perhaps tie Error* to
+snmp_session struct rather than current duplicate representation.
+
+make the parsed mib interface $SNMP::MIB writable
+
+allow unloading and reinitialization of parsed MIB
+
+attach to libucdagent - provide agent functionality
+
+look for *Not Implemeted* and implement :)
 

@@ -10,7 +10,7 @@ use Test;
 BEGIN { plan tests => 5 }
 use SNMP;
 my $host = 'localhost';
-my $comm = 'private';
+my $comm = 'v1_private';
 my $badcomm = 'KKK';
 my $port = 7000;
 my $junk_oid = ".1.3.6.1.2.1.1.1.1.1.1";
@@ -28,14 +28,14 @@ my $snmpd_cmd;
 
 if ((-e "t/snmpd.pid") && (-r "t/snmpd.pid")) {
 # Making sure that any running agents are killed.
-    system "kill `cat t/snmpd.pid`" > "/dev/null";
+    system "kill `cat t/snmpd.pid` > /dev/null 2>&1";
 } 
 
 
 if (open(CMD,"<t/snmpd.cmd")) {
     ($snmpd_cmd) = (<CMD> =~ /SNMPD => (\S+)\s*/);
     if (-r $snmpd_cmd and -x $snmpd_cmd) {
-	system "$snmpd_cmd -r -l t/snmpd.log -C -c t/snmpd.conf -p $port -P t/snmpd.pid";
+	system "$snmpd_cmd -r -l t/snmpd.log -C -c t/snmpd.conf -p $port -P t/snmpd.pid > /dev/null 2>&1";
     } else {
 	undef $snmpd_cmd;
     }
@@ -48,7 +48,7 @@ $n = 14;  # Number of tests to run
 if ($n == 0) { exit 0; }
 
 # create list of varbinds for GETS, val field can be null or omitted
-$vars = new SNMP::VarList (
+my $vars = new SNMP::VarList (
 			   ['sysDescr', '0', ''],
 			   ['sysContact', '0'],
 			   ['sysName', '0'],
@@ -109,4 +109,9 @@ unless ($snmpd_cmd) {
 }
 
 
-system "kill `cat t/snmpd.pid`";
+
+if ((-e "t/snmpd.pid") && (-r "t/snmpd.pid")) {
+# Making sure that any running agents are killed.
+    system "kill `cat t/snmpd.pid` > /dev/null 2>&1";
+}
+

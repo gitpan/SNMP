@@ -11,10 +11,10 @@ BEGIN { plan tests => 7 }
 use SNMP;
 
 my $host = 'localhost';
-my $comm = 'private';
+my $comm = 'v1_private';
 my $port = 12000;
 my $junk_oid = ".1.3.6.1.2.1.1.1.1.1.1";
-my $oid = '.1.3.6.1.2.1.1.1';
+my $oid = ".1.3.6.1.2.1.1.1";
 my $junk_name = 'fooDescr';
 my $junk_host = 'no.host.here';
 my $name = "gmarzot\@nortelnetworks.com";
@@ -23,14 +23,15 @@ my $snmpd_cmd;
 
 if ((-e "t/snmpd.pid") && (-r "t/snmpd.pid")) {
 # Making sure that any running agents are killed.
-    system "kill `cat t/snmpd.pid`" > "/dev/null";
+    system "kill `cat t/snmpd.pid` > /dev/null 2>&1";
+    unlink "t/snmpd.pid";
 }
 
 
 if (open(CMD,"<t/snmpd.cmd")) {
     ($snmpd_cmd) = (<CMD> =~ /SNMPD => (\S+)\s*/);
     if (-r $snmpd_cmd and -x $snmpd_cmd) {
-	system "$snmpd_cmd -r -l t/snmpd.log -C -c t/snmpd.conf -p $port -P t/snmpd.pid";
+	system "$snmpd_cmd -r -l t/snmpd.log -C -c t/snmpd.conf -p $port -P t/snmpd.pid > /dev/null 2>&1";
     } else {
 	undef $snmpd_cmd;
     }
@@ -44,7 +45,7 @@ $n = 15;  # Number of tests to run
 if ($n == 0) { exit 0; }
 
 # create list of varbinds for GETS, val field can be null or omitted
-$vars = new SNMP::VarList (
+my $vars = new SNMP::VarList (
 			   ['sysDescr', '0', ''],
 			   ['sysObjectID', '0'],
 			   ['sysUpTime', '0'],	
@@ -111,6 +112,7 @@ $value = 'Router Management Labs';
 $s1->set('sysLocation.0', $value);
 $finalvalue = $s1->get('sysLocation.0');
 ok($originalLocation ne $finalvalue); 
+#print STDERR "Error string = $s1->{ErrorStr}:$s1->{ErrorInd}\n";
 #print("set value is: $finalvalue\n\n"); 
 $s1->set('sysLocation.0', $originalLocation);  
 
@@ -136,13 +138,13 @@ $s1->set('sysLocation.0', $originalLocation);
 # Test for an integer (READ-ONLY)
 $originalservice = $s1->get('sysServices.0');
 #print("services is: $originalservice\n");
-$junk_service = 'Nortel Networks';
+$junk_service = "Nortel Networks";
 $s1->set('sysServices.0', $junk_service);
 
 $finalvalue = $s1->get('sysServices.0');
 #print("services is: $finalvalue\n");
 #print("Services is: $originalservice\n");
-ok($originalservice == $finalvalue);
+ok($originalservice eq $finalvalue);
 #print STDERR "Error string = $s1->{ErrorStr}:$s1->{ErrorInd}\n";
 $s1->set('sysServices.0',$originalservice);
 #print("\n");
@@ -155,11 +157,11 @@ $s1->set('sysServices.0',$originalservice);
 
 $originalTrap = $s1->get('snmpEnableAuthenTraps.0');
 #print("trap is -- $originalTrap\n");
-$junk_trap = 'Nortel Networks';
+$junk_trap = "Nortel Networks";
 $s1->set('snmpEnableAuthenTraps.0', $junk_trap);
 $finalvalue = $s1->get('snmpEnableAuthenTraps.0');
 #print("final trap is: $finalvalue\n");
-ok($finalvalue != $junk_trap);
+ok($finalvalue ne $junk_trap);
 # Should the error be 'Value out of range: SNMPERR_RANGE ?
 #print STDERR "Error string = $s1->{ErrorStr}:$s1->{ErrorInd}\n";
 $s1->set('snmpEnableAuthenTraps.0',$originalTrap);
@@ -222,13 +224,13 @@ ok($s1->{ErrorStr} =~ /^Bad/ );
 ##############   13   ############################
 
 # OID test
-$oid = $s1->get('sysORID.1');
-#print("OID is : $oid\n");
+my $oldoid = $s1->get("sysORID.1");
+#print("OID is : $oldoid\n");
 $junk_OID = .6.6.6.6.6.6;
 $s1->set('sysORID.1', $junk_OID);
-$newOID = $s1->get('sysORID.1');
+$newOID = $s1->get("sysORID.1");
 #print("new oid is $newOID\n"); 
-ok($oid == $newOID);
+ok($oldoid eq $newOID);
 #print STDERR "Error string = $s1->{ErrorStr}:$s1->{ErrorInd}\n";
 #print("\n");
 ################  14  ##########################
@@ -242,8 +244,10 @@ ok( $s1->{ErrorStr} =~ /^Unknown/ );
 
 ##############################################
 
+if ((-e "t/snmpd.pid") && (-r "t/snmpd.pid")) {
+# Making sure that any running agents are killed.
+    system "kill `cat t/snmpd.pid` > /dev/null 2>&1";
+}
 
-
-system "kill `cat t/snmpd.pid`";
 
 

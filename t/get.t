@@ -7,11 +7,11 @@ BEGIN {
     }
 }
 use Test;
-BEGIN { plan tests => 19 }
+BEGIN { plan tests => 18 }
 use SNMP;
 
 my $host = 'localhost';
-my $comm = 'private';
+my $comm = 'v1_private';
 my $port = 12000;
 my $junk_oid = ".1.3.6.1.2.1.1.1.1.1.1";
 my $oid = '.1.3.6.1.2.1.1.1';
@@ -23,13 +23,14 @@ my $snmpd_cmd;
 
 if ((-e "t/snmpd.pid") && (-r "t/snmpd.pid")) {
 # Making sure that any running agents are killed.
-    system "kill `cat t/snmpd.pid`" > "/dev/null";
+    system "kill `cat t/snmpd.pid` > /dev/null 2>&1";
+    unlink "t/snmpd.pid";
 }
 
 if (open(CMD,"<t/snmpd.cmd")) {
     ($snmpd_cmd) = (<CMD> =~ /SNMPD => (\S+)\s*/);
     if (-r $snmpd_cmd and -x $snmpd_cmd) {
-	system "$snmpd_cmd -r -l t/snmpd.log -C -c t/snmpd.conf -p $port -P t/snmpd.pid";
+	system "$snmpd_cmd -r -l t/snmpd.log -C -c t/snmpd.conf -p $port -P t/snmpd.pid > /dev/null 2>&1";
     } else {
 	undef $snmpd_cmd;
     }
@@ -67,10 +68,10 @@ $vars = new SNMP::VarList (
 
 #			   ['hrStorageType', '2'],
 #			   ['hrSystemDate', '0'],
-			   ['sysORIndex', '1'],
-			   ['sysORID', '2'],
-			   ['sysORDescr', '3'],
-			   ['sysORUpTime', '4'],
+#			   ['sysORIndex', '1'],
+			   ['sysORID', '1'],
+			   ['sysORDescr', '1'],
+			   ['sysORUpTime', '1'],
 #			   ['ifName', '1'],
 			   ['sysORLastChange', '0'],
 			   ['ipInHdrErrors', '0'],
@@ -115,9 +116,8 @@ unless ($snmpd_cmd) {
 ######################################################################
 # Get the standard Vars and check that we got some defined vars back
 @ret = $s1->get($vars);
-#print STDERR "Error string = $s1->{ErrorStr}:$s1->{ErrorInd}\n";
 ok(!$s1->{ErrorStr} and defined($ret[0]));
-
+#print STDERR "Error string = $s1->{ErrorStr}:$s1->{ErrorInd}\n";
 ######################################################################
 # Check that we got back the number we asked for.
 ok($#ret == $#{$vars});
@@ -210,19 +210,19 @@ ok(defined($time));
 #############################################
 
 # Integer test
-$index = $s1->get('sysORIndex.0');
+#$index = $s1->get('sysORIndex.0');
 #print("index is : $index\n");
-ok(defined($index));
+#ok(defined($index));
 #############################################
 
 # OID test
-$oid = $s1->get('sysORID.2');
+$oid = $s1->get('sysORID.1');
 #print("index is : $oid\n");
 ok(defined($oid));
 #############################################
 
 # String test
-$descr = $s1->get('sysORDescr.3');
+$descr = $s1->get('sysORDescr.1');
 #print("Sys Descr is : $descr\n");
 ok(defined($descr));
 #############################################
@@ -239,8 +239,10 @@ $unknown = $s1->get('ifmyData.0');
 ok(!defined($unknown));
 ##############################################
 
+if ((-e "t/snmpd.pid") && (-r "t/snmpd.pid")) {
+# Making sure that any running agents are killed.
+    system "kill `cat t/snmpd.pid` > /dev/null 2>&1";
+}
 
-
-system "kill `cat t/snmpd.pid`";
 
 

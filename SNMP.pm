@@ -7,7 +7,7 @@
 #     modify it under the same terms as Perl itself.
 
 package SNMP;
-$VERSION = '3.0.0b1';   # current release version number
+$VERSION = '3.1.0b1';   # current release version number
 
 require Exporter;
 require DynaLoader;
@@ -93,7 +93,7 @@ $use_enums = 0; # non-zero to return integers as enums and allow sets
                 # may also be set on a per session basis (see UseEnums)
 %MIB = ();      # tied hash to access libraries internal mib tree structure
                 # parsed in from mib files
-$verbose = 0;   # controls warning/info output of SNMP module, 
+$verbose = 0;   # controls warning/info output of SNMP module,
                 # 0 => no output, 1 => enables warning and info
                 # output from SNMP module itself (is also controlled
                 # by SNMP::debugging)
@@ -232,7 +232,7 @@ sub strip_session_params {
 
 
 sub snmp_get {
-# procedural form of 'get' method. sometimes quicker to code 
+# procedural form of 'get' method. sometimes quicker to code
 # but is less efficient since the Session is created and destroyed
 # with each call. Takes all the parameters of both SNMP::Session::new and
 # SNMP::Session::get (*NOTE*: this api does not support async callbacks)
@@ -244,7 +244,7 @@ sub snmp_get {
 }
 
 sub snmp_getnext {
-# procedural form of 'getnext' method. sometimes quicker to code 
+# procedural form of 'getnext' method. sometimes quicker to code
 # but is less efficient since the Session is created and destroyed
 # with each call. Takes all the parameters of both SNMP::Session::new and
 # SNMP::Session::getnext (*NOTE*: this api does not support async callbacks)
@@ -256,7 +256,7 @@ sub snmp_getnext {
 }
 
 sub snmp_set {
-# procedural form of 'set' method. sometimes quicker to code 
+# procedural form of 'set' method. sometimes quicker to code
 # but is less efficient since the Session is created and destroyed
 # with each call. Takes all the parameters of both SNMP::Session::new and
 # SNMP::Session::set (*NOTE*: this api does not support async callbacks)
@@ -268,7 +268,7 @@ sub snmp_set {
 }
 
 sub snmp_trap {
-# procedural form of 'trap' method. sometimes quicker to code 
+# procedural form of 'trap' method. sometimes quicker to code
 # but is less efficient since the Session is created and destroyed
 # with each call. Takes all the parameters of both SNMP::TrapSession::new and
 # SNMP::TrapSession::trap
@@ -297,7 +297,7 @@ sub reply_cb {
 
 sub select_info {
     # retrieves SNMP used fd's and timeout info
-    # calculates timeout in fractional seconds 
+    # calculates timeout in fractional seconds
     # ( easy to use with select statement )
     my($block, $to_sec, $to_usec, @fd_set)=SNMP::_get_select_info();
     my $time_sec_dec = ($block? 0 : $to_sec + $to_usec * 1e-6);
@@ -314,7 +314,7 @@ sub check_timeout {
   # timed out, and if so triggers
   # the callback function
   SNMP::_check_timeout();
-  # check to see when have to check again  
+  # check to see when have to check again
   my($block, $to_sec, $to_usec, @fd_set)=SNMP::_get_select_info();
   my $time_sec_dec = ($block? 0 : $to_sec + $to_usec * 1e-6);
   #print "fd's for snmp -> ", @fd_set, "\n";
@@ -332,7 +332,7 @@ sub _tie {
 #
 # short term solution was call this perl func which calls 'tie'
 #
-# longterm fix is to supply a patch which allows AS to export pp_tie in 
+# longterm fix is to supply a patch which allows AS to export pp_tie in
 # such a way that it can be called from XS code. gsarathy says:
 # a patch to util.c is needed to provide access to PL_paddr
 # so it is possible to call PL_paddr[OP_TIE] as the compiler does
@@ -384,8 +384,9 @@ sub new {
 	 return undef;
      }
    }
-   
-   if ($this->{Version} == 1 or $this->{Version} == 2) {
+
+   if ($this->{Version} eq '1' or $this->{Version} eq '2'
+       or $this->{Version} eq '2c') {
        $this->{SessPtr} = SNMP::_new_session($this->{Version},
 					     $this->{Community},
 					     $this->{DestAddr},
@@ -393,20 +394,20 @@ sub new {
 					     $this->{Retries},
 					     $this->{Timeout},
 					     );
-   } elsif ($this->{Version} == 3 ) {
+   } elsif ($this->{Version} eq '3' ) {
        $this->{SecName} ||= 'initial';
        $this->{SecLevel} ||= 'noAuthNoPriv';
        $this->{SecLevel} = $SNMP::V3_SEC_LEVEL_MAP{$this->{SecLevel}}
           if $this->{SecLevel} !~ /^\d+$/;
-#       $this->{SecEngineId};
+       $this->{SecEngineId} ||= '';
        $this->{ContextEngineId} ||= $this->{SecEngineId};
        $this->{Context} ||= '';
        $this->{AuthProto} ||= 'MD5';
-#       $this->{AuthPass};
+       $this->{AuthPass} ||= '';
        $this->{PrivProto} ||= 'DES';
-#       $this->{PrivPass};
-#       $this->{EngineBoots};
-#       $this->{EngineTime};
+       $this->{PrivPass} ||= '';
+       $this->{EngineBoots} = 0 if not defined $this->{EngineBoots};
+       $this->{EngineTime} = 0 if not defined $this->{EngineTime};
 
        $this->{SessPtr} = SNMP::_new_v3_session($this->{Version},
 						$this->{DestAddr},
@@ -426,9 +427,10 @@ sub new {
 						$this->{EngineTime},
 						);
    }
-
-   return undef unless $this->{SessPtr};
-   
+   unless ($this->{SessPtr}) {
+       warn("unable to create session") if $SNMP::verbose;
+       return undef;
+   }
 
    SNMP::initMib($SNMP::auto_init_mib); # ensures that *some* mib is loaded
 
@@ -443,9 +445,9 @@ sub update {
 # *Not Implemented*
 # designed to update the fields of session to allow retargettinf to different
 # host, community name change, timeout, retry changes etc. Unfortunately not
-# working yet because some updates (the address in particular) need to be 
+# working yet because some updates (the address in particular) need to be
 # done on the internal session pointer which cannot be fetched w/o touching
-# globals at this point which breaks win32. A patch to the ucd-snmp toolkit 
+# globals at this point which breaks win32. A patch to the ucd-snmp toolkit
 # is needed
    my $this = shift;
    my ($name, $aliases, $host_type, $len, $thisaddr);
@@ -481,7 +483,7 @@ sub update {
 		 $this->{Timeout},
 		);
 
-  
+
 }
 
 sub set {
@@ -718,10 +720,10 @@ sub trap {
 #             [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
 #                                                          # always last
 # (v2) srcParty, dstParty, oid, uptime, <vars>
-# $sess->trap(srcParty => party1, 
+# $sess->trap(srcParty => party1,
 #             dstParty => party2,
 #             oid => 'snmpRisingAlarm',
-#             uptime => 1234, 
+#             uptime => 1234,
 #             [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
 #                                                          # always last
    my $this = shift;
@@ -738,23 +740,23 @@ sub trap {
      $varbind_list_ref = $vars if ref($$vars[0]) =~ /ARRAY/;
    }
 
-   if ($this->{Version} == 1) {
+   if ($this->{Version} eq '1') {
        my $enterprise = $param{enterprise} || 'ucdavis';
-       $enterprise = SNMP::translateObj($enterprise) 
+       $enterprise = SNMP::translateObj($enterprise)
 	   unless $enterprise =~ /^[\.\d]+$/;
        my $agent = $param{agent} || '';
        my $generic = $param{generic} || 'specific';
        $generic = $trap_type{$generic} || $generic;
        my $uptime = $param{uptime} || SNMP::_sys_uptime();
        my $specific = $param{specific} || 0;
-       @res = SNMP::_trapV1($this, $enterprise, $agent, $generic, $specific, 
+       @res = SNMP::_trapV1($this, $enterprise, $agent, $generic, $specific,
 			  $uptime, $varbind_list_ref);
    } else {
        my $dstParty = $param{dstParty};
        my $srcParty = $param{srcParty};
        my $oid = $param{oid};
        my $uptime = $param{uptime};
-       @res = SNMP::_trapV2($this, $dstParty, $srcParty, $oid, 
+       @res = SNMP::_trapV2($this, $dstParty, $srcParty, $oid,
 			  $uptime, $varbind_list_ref);
    }
 
@@ -824,18 +826,18 @@ sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }
 
 sub FETCH { ${$_[0]}; }
 
-sub STORE { 
+sub STORE {
     $SNMP::verbose = $_[1];
-    SNMP::_set_debugging($_[1]>1); 
-    $SNMP::dump_packet = ($_[1]>2); 
-    ${$_[0]} = $_[1]; 
+    SNMP::_set_debugging($_[1]>1);
+    $SNMP::dump_packet = ($_[1]>2);
+    ${$_[0]} = $_[1];
 }
 
-sub DELETE { 
-    $SNMP::verbose = 0; 
-    SNMP::_set_debugging(0); 
-    $SNMP::dump_packet = 0; 
-    ${$_[0]} = undef; 
+sub DELETE {
+    $SNMP::verbose = 0;
+    SNMP::_set_debugging(0);
+    $SNMP::dump_packet = 0;
+    ${$_[0]} = undef;
 }
 
 package SNMP::DUMP_PACKET;
@@ -879,13 +881,13 @@ sub FIRSTKEY { return '.1'; } # this should actually start at .0 but
                               # miss most of the tree
 sub NEXTKEY { # this could be sped up by using an XS __get_next_oid maybe
    my $node = $_[0]->FETCH($_[1])->{nextNode};
-   $node->{objectID};  
-} 
+   $node->{objectID};
+}
 sub EXISTS { exists $_[0]->{$_[1]} || $_[0]->FETCH($_[1]); }
 sub CLEAR { undef %{$_[0]}; } # clear the cache
 
 package SNMP::MIB::NODE;
-my %node_elements = 
+my %node_elements =
     (
      objectID => 0, # dotted decimal fully qualified OID
      label => 0,    # leaf textual identifier (e.g., 'sysDescr')
@@ -896,9 +898,9 @@ my %node_elements =
      indexes => 0,  # returns array of column labels
      nextNode => 0, # next lexico node (BUG! does not return in lexico order)
      type => 0,     # returns simple type (see getType for values)
-     access => 0,   # returns ACCESS (ReadOnly, ReadWrite, WriteOnly, 
+     access => 0,   # returns ACCESS (ReadOnly, ReadWrite, WriteOnly,
                     # NoAccess, Notify, Create)
-     status => 0,   # returns STATUS (Mandatory, Optional, Obsolete, 
+     status => 0,   # returns STATUS (Mandatory, Optional, Obsolete,
                     # Deprecated)
      syntax => 0,   # returns 'textualConvention' if defined else 'type'
      textualConvention => 0, # returns TEXTUAL-CONVENTION
@@ -924,7 +926,7 @@ sub DELETE {
 sub FIRSTKEY { my $k = keys %node_elements; (each(%node_elements))[0]; }
 sub NEXTKEY { (each(%node_elements))[0]; }
 sub EXISTS { exists($node_elements{$_[1]}); }
-sub CLEAR {  
+sub CLEAR {
     warn "CLEAR(@_): write access to MIB node not implemented\n";
 }
 
@@ -963,12 +965,12 @@ SNMP - The Perl5 'SNMP' Extension Module v3.0.0b1 for the UCD SNMPv3 Library
 
 =head1 DESCRIPTION
 
-The basic operations of the SNMP protocol are provided by this module 
-through an object oriented interface for modularity and ease of use. 
-The primary class is SNMP::Session which encapsulates the persistent 
-aspects of a connection between the management application and the 
-managed agent. Internally the class is implemented as a blessed hash 
-reference. This class supplies 'get', 'getnext', 'set', 'fget', and 
+The basic operations of the SNMP protocol are provided by this module
+through an object oriented interface for modularity and ease of use.
+The primary class is SNMP::Session which encapsulates the persistent
+aspects of a connection between the management application and the
+managed agent. Internally the class is implemented as a blessed hash
+reference. This class supplies 'get', 'getnext', 'set', 'fget', and
 'fgetnext' method calls. The methods take a variety of input argument
 formats and support both syncronous and asyncronous operation through
 a polymorphic API (i.e., method behaviour varies dependent on args
@@ -1020,12 +1022,12 @@ default 'initial', security name (v3)
 
 =item SecLevel
 
-default 'noAuthNoPriv', security level [noAuthNoPriv, 
-authNoPriv, authPriv] (v3) 
+default 'noAuthNoPriv', security level [noAuthNoPriv,
+authNoPriv, authPriv] (v3)
 
 =item SecEngineId
 
-default <none>, security engineID, will be probed if not 
+default <none>, security engineID, will be probed if not
 supplied (v3)
 
 =item ContextEngineId
@@ -1069,8 +1071,8 @@ default 'undef', used by 'fget[next]', holds an hash
 reference of output value formatters, (e.g., {<type> =>
 <sub-ref>, ... }, the supplied sub is called to translate
 the value to a new format, unless a VarFormat mathces first
-(e.g., $sess->{TypeFormats}{INTEGER} = \&mapEnum(); 
-although this can be done more efficiently by enabling 
+(e.g., $sess->{TypeFormats}{INTEGER} = \&mapEnum();
+although this can be done more efficiently by enabling
 $SNMP::use_enums or session creation param 'UseEnums')
 
 =item UseLongNames
@@ -1131,7 +1133,7 @@ internal field used to cache a created session structure
 
 =item $sess->update(E<lt>fieldsE<gt>)
 
-Updates the SNMP::Session object with the values fields 
+Updates the SNMP::Session object with the values fields
 passed in as a hash list (similar to new(E<lt>fieldsE<gt>))
 B<(WARNING! not fully implemented)>
 
@@ -1205,10 +1207,10 @@ supports all applicable fields from SNMP::Session
 
 =item trap(srcParty, dstParty, oid, uptime, <vars>) - v2 format - B<* Not Implemented *>
 
-    $sess->trap(srcParty => party1, 
+    $sess->trap(srcParty => party1,
                 dstParty => party2,
                 oid => 'snmpRisingAlarm',
-                uptime => 1234, 
+                uptime => 1234,
                 [[ifIndex, 1, 1],[sysLocation, 0, "here"]]); # optional vars
                                                              # always last
 
@@ -1223,7 +1225,7 @@ supports all applicable fields from SNMP::Session
 =item SNMP::VarList
 
 represents an array of MIB objects to get or set,
-implemented as a blessed reference to an array of 
+implemented as a blessed reference to an array of
 SNMP::Varbinds, (e.g., [<varbind1>, <varbind2>, ...])
 
 =item SNMP::Varbind
@@ -1381,18 +1383,18 @@ not updated in get[next] operations as are the other forms.
 
 callback will be called when response is received or timeout
 occurs. the last argument passed to callback will be a
-SNMP::VarList reference. In case of timeout the last argument 
+SNMP::VarList reference. In case of timeout the last argument
 will be undef.
 
 =over
 
-=item &SNMP::MainLoop([<timeout>, [<callback>]])  
+=item &SNMP::MainLoop([<timeout>, [<callback>]])
 
 to be used with async SNMP::Session
 calls. MainLoop must be called after initial async calls
-so return packets from the agent will not be processed. 
+so return packets from the agent will not be processed.
 If no args suplied this function enters an infinite loop
-so program must be exited in a callback or externally 
+so program must be exited in a callback or externally
 interupted. If <timeout(sic)
 
 =back
@@ -1415,7 +1417,7 @@ man mib_api)
 
 =item $SNMP::verbose
 
-default '0', controls warning/info output of 
+default '0', controls warning/info output of
 SNMP module, 0 => no output, 1 => enables warning/info
 output from SNMP module itself (is also controlled
 by SNMP::debugging - see below)
@@ -1445,8 +1447,8 @@ set on a per session basis (see UseEnums)
 
 =item $SNMP::save_descriptions
 
-default '0',set non-zero to have mib parser save 
-attribute descriptions. must be set prior to mib 
+default '0',set non-zero to have mib parser save
+attribute descriptions. must be set prior to mib
 initialization
 
 =item $SNMP::debugging
@@ -1472,21 +1474,21 @@ level 2 plus snmp_set_dump_packet(1)
 
 =item $SNMP::dump_packet
 
-default '0', set [non-]zero to independently set 
+default '0', set [non-]zero to independently set
 snmp_set_dump_packet()
 
 =back
 
 =head1 %SNMP::MIB
 
-a tied hash to access parsed MIB information. After 
-the MIB has been loaded this hash allows access to  
+a tied hash to access parsed MIB information. After
+the MIB has been loaded this hash allows access to
 to the parsed in MIB meta-data(the structure of the
 MIB (i.e., schema)). The hash returns blessed
 references to SNMP::MIB::NODE objects which represent
 a single MIB attribute. The nodes can be fetched with
 multiple 'key' formats - the leaf name (e.g.,sysDescr)
-or fully/partially qualified name (e.g., 
+or fully/partially qualified name (e.g.,
 system.sysDescr) or fully qualified numeric OID. The
 returned node object supports the following fields:
 
@@ -1526,12 +1528,12 @@ returns application type (see getType for values)
 
 =item access
 
-returns ACCESS (ReadOnly, ReadWrite, WriteOnly, 
+returns ACCESS (ReadOnly, ReadWrite, WriteOnly,
 NoAccess, Notify, Create)
 
 =item status
 
-returns STATUS (Mandatory, Optional, Obsolete, 
+returns STATUS (Mandatory, Optional, Obsolete,
 Deprecated)
 
 =item syntax
@@ -1572,8 +1574,8 @@ specification of mib file independent of enviroment
 variables. called with no args acts like initMib,
 loading MIBs indicated by environment variables (see
 ucd mib_api docs). passing non-zero second arg
-forces previous mib to be freed and replaced 
-B<(Note: second arg not working since freeing previous 
+forces previous mib to be freed and replaced
+B<(Note: second arg not working since freeing previous
 Mib is more involved than before)>.
 
 =item &SNMP::initMib()
@@ -1633,15 +1635,15 @@ GAUGE, TIMETICKS, OPAQUE, or undef
 
 converts integer value to enumertion tag defined
 in Mib or converts tag to integer depending on
-input. the function will return the corresponding 
+input. the function will return the corresponding
 integer value *or* tag for a given MIB attribute
-and value. The function will sense which direction 
-to perform the conversion. Various arg formats are 
+and value. The function will sense which direction
+to perform the conversion. Various arg formats are
 supported
 
 =over
 
-=item $val = SNMP::mapEnum($varbind); 
+=item $val = SNMP::mapEnum($varbind);
 
 where $varbind is SNMP::Varbind or equiv.
 note: $varbind will be updated
@@ -1654,7 +1656,7 @@ note: $varbind will be updated
 
 =back
 
-=head1 Exported SNMP utility functions 
+=head1 Exported SNMP utility functions
 
 Note: utility functions do not support async operation yet.
 
@@ -1662,22 +1664,22 @@ Note: utility functions do not support async operation yet.
 
 =item &snmp_get()
 
-takes args of SNMP::Session::new followed by those of 
+takes args of SNMP::Session::new followed by those of
 SNMP::Session::get
 
 =item &snmp_getnext()
 
-takes args of SNMP::Session::new followed by those of 
+takes args of SNMP::Session::new followed by those of
 SNMP::Session::getnext
 
 =item &snmp_set()
 
-takes args of SNMP::Session::new followed by those of 
+takes args of SNMP::Session::new followed by those of
 SNMP::Session::set
 
 =item &snmp_trap()
 
-takes args of SNMP::TrapSession::new followed by those of 
+takes args of SNMP::TrapSession::new followed by those of
 SNMP::TrapSession::trap
 
 =back
@@ -1690,7 +1692,7 @@ possibilities.
 The first step should be to test the UCD SNMP installation
 independently from the Perl5 SNMP interface.
 
-Try running the apps from the UCD SNMP distribution. 
+Try running the apps from the UCD SNMP distribution.
 
 Make sure your agent (snmpd) is running and properly configured with
 read-write access for the community you are using.
@@ -1705,7 +1707,7 @@ If the problem occurs during compilation/linking check that the snmp
 library being linked is actually the UCD SNMP library (there have been
 name conflicts with existing snmp libs).
 
-Also check that the header files are correct and up to date. 
+Also check that the header files are correct and up to date.
 
 Sometimes compiling the UCD SNMP library with
 'position-independent-code' enabled is required (HPUX specifically).
@@ -1720,7 +1722,7 @@ versions for OS/Perl/UCD/compiler, complete error output, etc.)
 =head1 Acknowledments
 
 Many thanks to all those who supplied patches, suggestions and
-feedback. 
+feedback.
 
  Wes Hardaker and the ucd-coders
  Dave Perkins
@@ -1738,7 +1740,7 @@ feedback.
  Michael Slifcak
  Perl5 Porters
 
- 
+
 Apologies to any/all who's patch/feature/request was not mentioned or
 included - most likely it was lost when paying work intruded on my
 fun. Please try again if you do not see a desired feature. This may
