@@ -69,6 +69,13 @@ $use_enums = 0; # non-zero to return integers as enums and allow sets
                 # using enums where appropriate - integer data will
                 # still be accepted for set operations
                 # may also be set on a per session basis
+%MIB = ();     # tied hash to library internal mib tree structure from
+                # parsed mib
+$save_descriptions = 0; #tied scalar to control saving descriptions during
+               # mib parsing - must be set prior to mib loading
+
+tie %SNMP::MIB, SNMP::MIB;
+tie $SNMP::save_descriptions, SNMP::MIB::SAVE_DESCR;
 
 sub setMib {
 # loads mib from file name provided
@@ -357,6 +364,79 @@ sub new {
 
    bless $this;
 }
+
+package SNMP::MIB;
+
+sub TIEHASH {
+    bless {};
+}
+
+sub FETCH {
+    my $this = shift;
+    my $key = shift;
+    if (!defined $this->{$key}) {
+        tie %{$this->{$key}}, SNMP::MIB::NODE, $key;
+    }
+    $this->{$key};
+}
+
+sub STORE {
+    warn "STORE(@_) : write access to the MIB not implemented\n";
+}
+
+sub DELETE {
+    delete $_[0]->{$_[1]}; # just delete cache entry
+}
+
+sub FIRSTKEY { return '.1'; }
+sub NEXTKEY { $_[0]->FETCH($_[1])->{nextNode}{objectID}; } 
+sub EXISTS { exits $_[0]->{$_[1]} || $_[0]->FETCH($_[1]); }
+sub CLEAR { undef %{$_[0]}; } # clear the cache
+
+package SNMP::MIB::NODE;
+my %node_elements = 
+    (
+     objectID => 0, # dotted decimal fully qulaified OID
+     label => 0,
+     subID => 0,
+     moduleID => 0,
+     parent => 0,   # parent node
+     children => 0, # array ref child nodes
+     nextNode => 0,     # next lexico node
+     type => 0,
+     access => 0,
+     units => 0,
+     hint => 0,
+     enums => 0,    # hash ref {tag => num, ...}
+     description => 0,
+    );
+
+# sub TIEHASH - implemented in SNMP.xs
+
+# sub FETCH - implemented in SNMP.xs
+
+sub STORE {
+    warn "STORE(@_): write access to the MIB not implemented\n";
+}
+
+sub DELETE {
+    warn "DELETE(@_): write access to the MIB not implemented\n";
+}
+
+sub FIRSTKEY {  }
+sub NEXTKEY {  }
+sub EXISTS {  }
+sub CLEAR {  }
+
+package SNMP::MIB::SAVE_DESCR;
+
+sub TIESCALAR { my $class = shift; my $val; bless \$val, $class; }
+
+sub FETCH { $$_[0]; }
+
+sub STORE { SNMP::_set_save_descriptions($_[1]); $$_[0] = $_[1]; }
+
+sub DELETE { SNMP::_set_save_descriptions(0); $$_[0] = 0; }
 
 package SNMP;
 END{SNMP::_sock_cleanup();}

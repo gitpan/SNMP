@@ -18,6 +18,7 @@ my %Params = (
     MAN3PODS     => ' ',  # Pods will be built by installman.
     XSPROTOARG   => '-noprototypes', 	# XXX remove later?
     VERSION_FROM => 'SNMP.pm',
+    realclean        => { FILES => 'host' },
 
 	    );
 my $snmp_lib, $snmp_llib, $sep;
@@ -32,16 +33,17 @@ if ($Config{'osname'} eq 'MSWin32') {
 }
 my $inc_path1 = "${sep}usr${sep}include";
 my $inc_path2 = "${sep}usr${sep}local${sep}include";
+my $inc_path3 = "${inc_path2}${sep}ucd-snmp";
 my $lib_path1 = "${sep}usr${sep}lib";
 my $lib_path2 = "${sep}usr${sep}local${sep}lib";
 
 my @IncludeFiles = qw[asn1.h mib.h parse.h snmp.h snmp_api.h 
-		      snmp_client.h snmp_impl.h mib.h];
+		      snmp_client.h snmp_impl.h];
 
-my @IncludeDirs = ($inc_path1, $inc_path2);
+my @IncludeDirs = ($inc_path1, $inc_path2, $inc_path3);
 
 my $IncludeDir = find_files(\@IncludeFiles,\@IncludeDirs) ||
-    prompt("Where are the $snmp_lib include files?","$inc_path2");
+    prompt("Where are the $snmp_lib include files?","$inc_path3");
 
 my @LibDirs = ($lib_path1, $lib_path2);
 
@@ -73,10 +75,11 @@ sub GetTestHost {
     my($host,$comm);
     if (-f 'host') {
        ($host, $comm) = split(' ',`cat host`);
+       return if $host and $comm;
     }
     $host ||= 'localhost';
     $comm ||= 'private';
-    my $resp = prompt("Enter hostname or IP address for SNMP tests: ",
+    my $resp = prompt("Enter host and community for SNMP tests: ",
 		      "$host $comm");
     open(H, ">host") || die "Error: could not open file 'host' ($!)";
     print H "$resp\n";

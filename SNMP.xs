@@ -54,6 +54,7 @@ DLL_IMPORT extern struct tree *Mib;
 
 #define TYPE_UNKNOWN 0
 #define MAX_TYPE_NAME_LEN 16
+#define STR_BUF_SIZE 1024
 
 static int __is_numeric_oid _((char*));
 static int __is_leaf _((struct tree*));
@@ -80,6 +81,7 @@ static int __send_sync_pdu _((struct snmp_session *, struct snmp_pdu *,
 #define NO_FLAGS 0x00
 
 typedef struct snmp_session SnmpSession;
+typedef struct tree SnmpMibNode;
 
 static int __is_numeric_oid (oidstr)
 char* oidstr;
@@ -431,7 +433,7 @@ int  * type;
    if (!tag) goto done;
 
    if (strchr(tag,'.')) { /* if multi part tag  */
-      if (!__scan_num_objid(tag, newname, &newname_len)) {/* numeric tag */
+      if (!__scan_num_objid(tag, newname, &newname_len)) { /* numeric tag */
          newname_len = MAX_NAME_LEN;
          read_objid(tag, newname, &newname_len); /* long name */
       }
@@ -453,7 +455,7 @@ int  * type;
 	      break;
          }
          *oid_arr_len = newname + MAX_OID_LEN - op;
-         bcopy(op, oid_arr, (newname + MAX_OID_LEN - op) * sizeof(oid));
+         bcopy(op, oid_arr, *oid_arr_len * sizeof(oid));
       }
    }
  done:
@@ -862,9 +864,7 @@ snmp_new_session(version, community, peer, port, retries, timeout)
 	{
 	   SnmpSession session;
 	   SnmpSession *ss = NULL;
-           SV* verbose;
-
-           verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
+           int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
 
            memset(&session, 0, sizeof(SnmpSession));
 
@@ -873,7 +873,7 @@ snmp_new_session(version, community, peer, port, retries, timeout)
            } else if (!strcmp(version, "2") || !strcmp(version, "2c")) {
 		session.version = SNMP_VERSION_2c;
            } else {
-		if (SvIV(verbose))
+		if (verbose)
                    warn("Unsupported SNMP version (%s)\n", version);
                 goto end;
 	   }
@@ -891,8 +891,7 @@ snmp_new_session(version, community, peer, port, retries, timeout)
            ss = snmp_open(&session);
 
            if (ss == NULL) {
-	      if (SvIV(verbose))
-                 warn("Couldn't open SNMP session");
+	      if (verbose) warn("Couldn't open SNMP session");
            }
         end:
            RETVAL = ss;
@@ -907,16 +906,16 @@ snmp_add_mib_dir(mib_dir,force=0)
 	int		force
 	CODE:
         {
-	SV *verbose;
 	int result;
-        verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
+        int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
+
         if (mib_dir && *mib_dir) {
 	   result = add_mibdir(mib_dir);
         }
         if (result) {
-           if (SvIV(verbose)) warn("Added mib dir %s\n", mib_dir);
+           if (verbose) warn("Added mib dir %s\n", mib_dir);
         } else {
-           if (SvIV(verbose)) warn("Failed to add %s\n", mib_dir);
+           if (verbose) warn("Failed to add %s\n", mib_dir);
         }
         RETVAL = (I32)result;
         }
@@ -930,31 +929,27 @@ snmp_read_mib(mib_file, force=0)
 	int		force
 	CODE:
         {
-	SV *verbose;
-
-        verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
-
-        
+        int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
 
         /* if (Mib && force) __free_tree(Mib); needs more work to cleanup */
 
         if ((mib_file == NULL) || (*mib_file == '\0')) {
            if (Mib == NULL) {
-              if (SvIV(verbose)) warn("initializing MIB\n");
+              if (verbose) warn("initializing MIB\n");
               init_mib();
               if (Mib) {
-                 if (SvIV(verbose)) warn("done\n");
+                 if (verbose) warn("done\n");
               } else {
-                 if (SvIV(verbose)) warn("failed\n");
+                 if (verbose) warn("failed\n");
               }
 	   }
         } else {
-           if (SvIV(verbose)) warn("reading MIB: %s\n", mib_file);
+           if (verbose) warn("reading MIB: %s\n", mib_file);
 	   Mib = read_mib(mib_file);
            if (Mib) {
-              if (SvIV(verbose)) warn("done\n");
+              if (verbose) warn("done\n");
            } else {
-              if (SvIV(verbose)) warn("failed\n");
+              if (verbose) warn("failed\n");
            }
         }
         RETVAL = (I32)Mib;
@@ -968,9 +963,7 @@ snmp_read_module(module)
 	char *		module
 	CODE:
         {
-	SV *verbose;
-
-        verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
+        int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
 
         if (!strcmp(module,"ALL")) {
            Mib = read_all_mibs();
@@ -978,9 +971,9 @@ snmp_read_module(module)
 	   Mib = read_module(module);
         }
         if (Mib) {
-           if (SvIV(verbose)) warn("Read %s\n", module);
+           if (verbose) warn("Read %s\n", module);
         } else {
-           if (SvIV(verbose)) warn("Failed reading %s\n", module);
+           if (verbose) warn("Failed reading %s\n", module);
         }
         RETVAL = (I32)Mib;
         }
@@ -1018,9 +1011,9 @@ snmp_set(sess_ref, varlist_ref)
            SV **err_ind_svp;
            int status = 0;
            int type;
-           SV* verbose;
-           verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
-
+           int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
+           int use_enums = SvIV(*hv_fetch((HV*)SvRV(sess_ref),"UseEnums",8,1));
+           struct enum_list *ep;
 
            oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
 
@@ -1052,7 +1045,7 @@ snmp_set(sess_ref, varlist_ref)
                                  (varbind_iid_f?SvPV(*varbind_iid_f,na):NULL),
                                  oid_arr, &oid_arr_len, &type);
                     if (oid_arr_len == 0) {
-                       if (SvIV(verbose))
+                       if (verbose)
                         warn("error: set: unable to determine oid for object");
                        continue;
                     }
@@ -1061,11 +1054,21 @@ snmp_set(sess_ref, varlist_ref)
                       type = __translate_appl_type(
                               (varbind_type_f?SvPV(*varbind_type_f,na):NULL));
                       if (type == TYPE_UNKNOWN) {
-                         if (SvIV(verbose))
+                         if (verbose)
                             warn("error: set: no type found for object");
                          continue;
                       }
                     }
+                    if (type==TYPE_INTEGER && use_enums && tp && tp->enums) {
+                      for(ep = tp->enums; ep; ep = ep->next) {
+                        if (varbind_type_f && 
+                            !strcmp(ep->label, SvPV(*varbind_val_f,na))) {
+                          sv_setiv(*varbind_val_f, ep->value);
+                          break;
+                        }
+                      }
+                    }
+                    
                     __add_var_val_str(pdu, oid_arr, oid_arr_len,
                                   (varbind_val_f?SvPV(*varbind_val_f,na):NULL),
                                   (varbind_val_f?SvCUR(*varbind_val_f):0),
@@ -1116,15 +1119,14 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref)
            SV *tmp_sv;
            int type;
 	   char tmp_type_str[MAX_TYPE_NAME_LEN];
-	   char str_buf[2048];
+	   char str_buf[STR_BUF_SIZE];
            SV **sess_ptr_sv;
            SV **err_str_svp;
            SV **err_num_svp;
            SV **err_ind_svp;
            int status;
            int sprintval_flag;
-           SV* verbose;
-           verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
+           int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
 
            oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
 
@@ -1161,7 +1163,7 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref)
                     if (oid_arr_len) {
                        snmp_add_null_var(pdu, oid_arr, oid_arr_len);
                     } else {
-                       if (SvIV(verbose))
+                       if (verbose)
                         warn("error: get: unable to determine oid for object");
                        snmp_add_null_var(pdu, oid_arr, oid_arr_len);
                     }
@@ -1248,14 +1250,13 @@ snmp_getnext(sess_ref, varlist_ref)
            SV **err_num_svp;
            SV **err_ind_svp;
            int status;
-	   char str_buf[2048];
+	   char str_buf[STR_BUF_SIZE];
            char *label;
            char *iid;
            char *cp;
            int getlabel_flag = FAIL_ON_NULL_IID;
            int sprintval_flag;
-           SV* verbose;
-           verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
+           int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
 
            oid_arr = (oid*)malloc(sizeof(oid) * MAX_NAME_LEN);
 
@@ -1401,21 +1402,19 @@ snmp_translate_obj(var,mode,use_long)
 	int		use_long
 	CODE:
 	{
-	   char str_buf[2048];
+	   char str_buf[STR_BUF_SIZE];
 	   oid oid_arr[MAX_NAME_LEN];
            int oid_arr_len = MAX_NAME_LEN;
            char * label;
            char * iid;
            int status = FAILURE;
-           SV* verbose;
-
-           verbose = perl_get_sv("SNMP::verbose", 0x01 | 0x04);
+           int verbose = SvIV(perl_get_sv("SNMP::verbose", 0x01 | 0x04));
 
            str_buf[0] = '\0';
   	   switch (mode) {
               case SNMP_XLATE_MODE_TAG2OID:
 		if (!get_node(var, oid_arr, &oid_arr_len)) {
-		   if (SvIV(verbose)) warn("Unknown OID %s\n",var);
+		   if (verbose) warn("Unknown OID %s\n",var);
                 } else {
                    status = __sprint_num_objid(str_buf, oid_arr, oid_arr_len);
                 }
@@ -1438,18 +1437,116 @@ snmp_translate_obj(var,mode,use_long)
 	        }
                 break;
              default:
-	       if (SvIV(verbose)) warn("unknown translation mode: %s\n", mode);
+	       if (verbose) warn("unknown translation mode: %s\n", mode);
            }
            RETVAL = str_buf;
 	}
         OUTPUT:
         RETVAL
 
+SnmpMibNode *
+snmp_lookup_tag(tag)
+	char *		tag
+	CODE:
+	{
+	   struct tree *tp  = NULL;
+           if (tag && *tag) tp = __tag2oid(tag, NULL, NULL, NULL, NULL);
+	   RETVAL = tp;
+	}
+	OUTPUT:
+        RETVAL
+
+void
+snmp_set_save_descriptions(val)
+	int	val
+	CODE:
+	{
+	   snmp_set_save_descriptions(val);
+	}
+
+
 void
 snmp_sock_cleanup()
 	CODE:
 	{
 	   SOCK_CLEANUP;
+	}
+
+MODULE = SNMP	PACKAGE = SNMP::MIB::NODE 	PREFIX = snmp_mib_node_
+SV *
+snmp_mib_node_TIEHASH(class,key)
+	char *	class
+	char *	key
+	CODE:
+	{
+           SnmpMibNode *tp;
+           tp = __tag2oid(key, NULL, NULL, NULL, NULL);
+           ST(0) = sv_newmortal();
+           sv_setref_iv(ST(0), class, (IV)tp);
+	}
+
+SV *
+snmp_mib_node_FETCH(tp_ref, key)
+	SV *	tp_ref
+	char *	key
+	CODE:
+	{
+	   char c = *key;
+	   oid newname[MAX_OID_LEN], *op;
+	   int newname_len = 0;
+	   char str_buf[STR_BUF_SIZE];
+           SnmpMibNode *tp = NULL;
+
+           if (SvROK(tp_ref)) tp = (SnmpMibNode*)SvIV((SV*)SvRV(tp_ref));
+
+	   ST(0) = sv_newmortal();
+           if (tp)
+	   switch (c) {
+	      case 'o': /* objectID */
+	         /* code taken from get_node in snmp_client.c */
+        	 for(op = newname + MAX_OID_LEN - 1; op >= newname; op--){
+	           *op = tp->subid;
+		   tp = tp->parent;
+		   if (tp == NULL)
+		      break;
+        	 }
+		 __sprint_num_objid(str_buf, op, newname + MAX_OID_LEN - op);
+                 sv_setpv(ST(0),str_buf);
+                 break;
+	      case 'l': /* label */
+                 sv_setpv(ST(0),tp->label);
+                 break;
+	      case 's': /* subID */
+                 sv_setiv(ST(0),(I32)tp->subid);
+                 break;
+	      case 'm': /* moduleID */
+                 sv_setiv(ST(0),(I32)tp->modid);
+                 break;
+	      case 'p': /* parent */
+                 break;
+	      case 'c': /* children */
+                 break;
+	      case 'n': /* nextNode */
+                 
+                 break;
+	      case 't': /* type */
+                 break;
+	      case 'a': /* access */
+                 break;
+	      case 'u': /* units */
+                 sv_setpv(ST(0),tp->units);
+                 break;
+	      case 'h': /* hint */
+                 sv_setpv(ST(0),tp->description);
+                 break;
+	      case 'e': /* enums */
+                 break;
+	      case 'd': /* description */
+                 sv_setpv(ST(0),tp->description);
+                 break;
+              default:
+                 break;
+	   }
 	}
 
 MODULE = SNMP	PACKAGE = SnmpSessionPtr	PREFIX = snmp_session_
@@ -1460,11 +1557,3 @@ snmp_session_DESTROY(sess_ptr)
 	{
            snmp_close( sess_ptr );
 	}
-
-
-
-
-
-
-
-
