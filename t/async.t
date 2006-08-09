@@ -1,5 +1,4 @@
 #!./perl
-
 BEGIN {
     unless(grep /blib/, @INC) {
         chdir 't' if -d 't';
@@ -11,6 +10,15 @@ use Test;
 BEGIN {plan tests => 20}
 use SNMP;
 use vars qw($agent_port $comm $agent_host);
+
+if ($^O =~ /win32/i) {
+  warn "Win32 detected - skipping and failing async calls\n";
+  for (my $i=1;$i <= 20; $i++) {
+    ok(0);
+  }
+  exit;
+}
+
 require "t/startagent.pl";
 
 
@@ -27,6 +35,7 @@ $SNMP::verbose = 0;
 $SNMP::dump_packet = 0;
 
 my $sess = new SNMP::Session(DestHost => $agent_host, 
+			  Version => 1, 
 			  Community => $comm, 
 			  RemotePort => $agent_port);
 

@@ -31,9 +31,6 @@ $vars = new SNMP::VarList (
 			   ['sysName', '0'],
 			   ['sysLocation', '0'],
 			   ['sysServices', '0'],
-			   ['ifNumber', '0'],
-			   ['ifDescr', '1'],
-			   ['ifSpeed', '1'],
 
 			   ['snmpInPkts', '0'],
 			   ['snmpInBadVersions', '0'],
@@ -41,21 +38,27 @@ $vars = new SNMP::VarList (
 			   ['snmpInBadCommunityUses', '0'],
 			   ['snmpInASNParseErrs', '0'],
 			   ['snmpEnableAuthenTraps', '0'],
-#			   ['snmpSilentDrops', '0'],
-#			   ['snmpProxyDrops', '0'],
-#			   ['snmpTrapEnterprise', '2'],
 
-#			   ['hrStorageType', '2'],
-#			   ['hrSystemDate', '0'],
-#			   ['sysORIndex', '1'],
 			   ['sysORID', '1'],
 			   ['sysORDescr', '1'],
 			   ['sysORUpTime', '1'],
-#			   ['ifName', '1'],
 			   ['sysORLastChange', '0'],
-			   ['ipInHdrErrors', '0'],
-			   ['ipDefaultTTL', '0'],
-			   ['ipInHdrErrors', '0'],
+			   ['snmpSilentDrops', '0'],
+			   ['snmpProxyDrops', '0'],
+
+## not all agents we know will support these objects
+#			   ['hrStorageType', '2'],
+#			   ['hrSystemDate', '0'],
+#			   ['sysORIndex', '1'],
+#			   ['ifName', '1'],
+#			   ['ifNumber', '0'],
+#			   ['ifDescr', '1'],
+#			   ['ifSpeed', '1'],
+#			   ['snmpTrapEnterprise', '2'],
+#			   ['ipInHdrErrors', '0'],
+#			   ['ipDefaultTTL', '0'],
+#			   ['ipInHdrErrors', '0'],
+
 		          );
 ################################################################
 # Yet to do:
@@ -75,7 +78,7 @@ $vars = new SNMP::VarList (
 ######################################################################
 # Fire up a session.
     $s1 =
-    new SNMP::Session (DestHost=>$agent_host,Community=>$comm,RemotePort=>$agent_port);
+    new SNMP::Session (DestHost=>$agent_host,Version=>1,Community=>$comm,RemotePort=>$agent_port);
     ok(defined($s1));
 
 ######################################################################
