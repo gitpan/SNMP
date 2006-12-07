@@ -1,13 +1,13 @@
-# SNMP.pm -- Perl 5 interface to the net-snmp toolkit
+# SNMP.pm -- Perl 5 interface to the Net-SNMP toolkit
 #
-# written by G. S. Marzot (gmarzot@nortelnetworks.com)
+# written by G. S. Marzot (marz@users.sourceforge.net)
 #
-#     Copyright (c) 1995-2000 G. S. Marzot. All rights reserved.
+#     Copyright (c) 1995-2006 G. S. Marzot. All rights reserved.
 #     This program is free software; you can redistribute it and/or
 #     modify it under the same terms as Perl itself.
 
 package SNMP;
-$VERSION = '5.0301002';   # current release version number
+$VERSION = '5.4';   # current release version number
 
 require Exporter;
 require DynaLoader;
@@ -116,6 +116,8 @@ $save_descriptions = 0; #tied scalar to control saving descriptions during
 $best_guess = 0;  # determine whether or not to enable best-guess regular
                   # expression object name translation.  1 = Regex (-Ib),
 		  # 2 = random (-IR)
+$non_increasing = 0; # stop polling with an "OID not increasing"-error
+                     # when an OID does not increases in bulkwalk.
 $replace_newer = 0; # determine whether or not to tell the parser to replace
                     # older MIB modules with newer ones when loading MIBs.
                     # WARNING: This can cause an incorrect hierarchy.
@@ -484,7 +486,7 @@ sub new {
        $this->{Context} ||= 
 	   NetSNMP::default_store::netsnmp_ds_get_string(NetSNMP::default_store::NETSNMP_DS_LIBRARY_ID(), 
 		         NetSNMP::default_store::NETSNMP_DS_LIB_CONTEXT()) || '';
-       $this->{AuthProto} ||= 'DEFAULT'; # defaults to the library's default
+       $this->{AuthProto} ||= 'DEFAULT'; # use the library's default
        $this->{AuthPass} ||=
        NetSNMP::default_store::netsnmp_ds_get_string(NetSNMP::default_store::NETSNMP_DS_LIBRARY_ID(), 
 		     NetSNMP::default_store::NETSNMP_DS_LIB_AUTHPASSPHRASE()) ||
@@ -496,7 +498,7 @@ sub new {
        $this->{AuthLocalizedKey} ||= '';
        $this->{PrivLocalizedKey} ||= '';
 
-       $this->{PrivProto} ||= 'DEFAULT';  # defaults to hte library's default
+       $this->{PrivProto} ||= 'DEFAULT';  # use the library's default
        $this->{PrivPass} ||=
        NetSNMP::default_store::netsnmp_ds_get_string(NetSNMP::default_store::NETSNMP_DS_LIBRARY_ID(), 
 		     NetSNMP::default_store::NETSNMP_DS_LIB_PRIVPASSPHRASE()) ||
@@ -542,6 +544,7 @@ sub new {
    $this->{UseSprintValue} = $SNMP::use_sprint_value 
        unless exists $this->{UseSprintValue};
    $this->{BestGuess} = $SNMP::best_guess unless exists $this->{BestGuess};
+   $this->{NonIncreasing} ||= $SNMP::non_increasing;
    $this->{UseEnums} = $SNMP::use_enums unless exists $this->{UseEnums};
    $this->{UseNumeric} = $SNMP::use_numeric unless exists $this->{UseNumeric};
 
@@ -557,7 +560,7 @@ sub update {
 # host, community name change, timeout, retry changes etc. Unfortunately not
 # working yet because some updates (the address in particular) need to be
 # done on the internal session pointer which cannot be fetched w/o touching
-# globals at this point which breaks win32. A patch to the ucd-snmp toolkit
+# globals at this point which breaks win32. A patch to the net-snmp toolkit
 # is needed
    my $this = shift;
    my ($name, $aliases, $host_type, $len, $thisaddr);
@@ -570,6 +573,7 @@ sub update {
    $this->{UseSprintValue} = $SNMP::use_sprint_value 
        unless exists $this->{UseSprintValue};
    $this->{BestGuess} = $SNMP::best_guess unless exists $this->{BestGuess};
+   $this->{NonIncreasing} ||= $SNMP::non_increasing;
    $this->{UseEnums} = $SNMP::use_enums unless exists $this->{UseEnums};
    $this->{UseNumeric} = $SNMP::use_numeric unless exists $this->{UseNumeric};
 
@@ -637,7 +641,9 @@ sub get {
 }
 
 
-$have_netsnmp_oid = eval { require NetSNMP::OID; };
+use strict;
+
+my $have_netsnmp_oid = eval { require NetSNMP::OID; };
 sub gettable {
 
     #
@@ -649,9 +655,11 @@ sub gettable {
     # i.e. we have reached the end of this table.
     #
 
-    my ($this, $root_oid, %options) = @_;
-    my $options = \%options;
-    my ($textnode, $stopconds, $varbinds, $vbl, $res, %result_hash, $repeat);
+    my $state;
+
+    my ($this, $root_oid, @options) = @_;
+    $state->{'options'} = {@options};
+    my ($textnode, $varbinds, $vbl, $res, $repeat);
 
     # translate the OID into numeric form if its not
     if ($root_oid !~ /^[\.0-9]+$/) {
@@ -665,12 +673,12 @@ sub gettable {
     return if (!$root_oid);
 
     # deficed if we're going to parse indexes
-    my $parse_indexes = (defined($options->{'noindexes'})) ? 
+    my $parse_indexes = (defined($state->{'options'}{'noindexes'})) ? 
       0 : $have_netsnmp_oid;
 
     # get the list of columns we should look at.
     my @columns;
-    if (!$options->{'columns'}) {
+    if (!$state->{'options'}{'columns'}) {
 	if ($textnode) {
 	    my %indexes;
 
@@ -685,20 +693,20 @@ sub gettable {
 	    # calculate the list of accessible columns that aren't indexes
 	    my $children = $SNMP::MIB{$textnode}{'children'}[0]{'children'};
 	    foreach my $c (@$children) {
-		push @columns,
+		push @{$state->{'columns'}},
 		  $root_oid . ".1." . $c->{'subID'}
 		    if (!$indexes{$c->{'label'}});
 	    }
-	    if ($#columns == -1) {
+	    if ($#{$state->{'columns'}} == -1) {
 		# some tables are only indexes, and we need to walk at
 		# least one column.  We pick the last.
-		push @columns, $root_oid . ".1." .
+		push @{$state->{'columns'}}, $root_oid . ".1." .
 		  $children->[$#$children]{'subID'};
 	    }
 	}
     } else {
 	# XXX: requires specification in numeric OID...  ack.!
-	@columns = @{$options->{'columns'}};
+	@{$state->{'columns'}} = @{$state->{'options'}{'columns'}};
 
 	# if the columns aren't numeric, we need to turn them into
 	# numeric columns...
@@ -706,56 +714,88 @@ sub gettable {
 	    if ($_ !~ /\.1\.3/) {
 		$_ = $SNMP::MIB{$_}{'objectID'};
 	    }
-	} @columns;
+	} @{$state->{'columns'}};
     }
 
     # create the initial walking info.
-    foreach my $c (@columns) {
-	push @$varbinds, [$c];
-	push @$stopconds, $c;
+    foreach my $c (@{$state->{'columns'}}) {
+	push @{$state->{'varbinds'}}, [$c];
+	push @{$state->{'stopconds'}}, $c;
     }
 
-    if ($#$varbinds == -1) {
+    if ($#{$state->{'varbinds'}} == -1) {
 	print STDERR "ack: gettable failed to find any columns to look for.\n";
 	return;
     }
 
-    $vbl = $varbinds;
+    $vbl = $state->{'varbinds'};
 	
     my $repeatcount;
-    if ($this->{Version} == 1 || $options->{nogetbulk}) {
-	$repeatcount = 1;
-    } elsif ($options->{'repeat'}) {
-	$repeatcount = $options->{'repeat'};
-    } elsif ($#$varbinds == -1) {
-	$repeatcount = 1;
+    if ($this->{Version} == 1 || $state->{'options'}{nogetbulk}) {
+	$state->{'repeatcount'} = 1;
+    } elsif ($state->{'options'}{'repeat'}) {
+	$state->{'repeatcount'} = $state->{'options'}{'repeat'};
+    } elsif ($#{$state->{'varbinds'}} == -1) {
+	$state->{'repeatcount'} = 1;
     } else {
 	# experimentally determined maybe guess at a best repeat value
 	# 1000 bytes max (safe), 30 bytes average for encoding of the
 	# varbind (experimentally determined to be closer to
 	# 26.  Again, being safe.  Then devide by the number of
 	# varbinds.
-	$repeatcount = int(1000 / 36 / ($#$varbinds + 1));
+	$state->{'repeatcount'} = int(1000 / 36 / ($#{$state->{'varbinds'}} + 1));
     }
 
-    if ($this->{Version} > 1 && !$options->{'nogetbulk'}) {
-	$res = $this->getbulk(0, $repeatcount, $vbl);
+    #
+    # if we've been configured with a callback, then call the
+    # sub-functions with a callback to our own "next" processing
+    # function (_gettable_do_it).  or else call the blocking method and
+    # call the next processing function ourself.
+    #
+    if ($state->{'options'}{'callback'}) {
+	if ($this->{Version} > 1 && !$state->{'options'}{'nogetbulk'}) {
+	    $res = $this->getbulk(0, $state->{'repeatcount'}, $vbl,
+				  [\&_gettable_do_it, $this, $vbl,
+				   $parse_indexes, $textnode, $state]);
+	} else {
+	    $res = $this->getnext($vbl,
+				  [\&_gettable_do_it, $this, $vbl,
+				   $parse_indexes, $textnode, $state]);
+	}
     } else {
-	$res = $this->getnext($vbl);
+	if ($this->{Version} > 1 && !$state->{'options'}{'nogetbulk'}) {
+	    $res = $this->getbulk(0, $state->{'repeatcount'}, $vbl);
+	} else {
+	    $res = $this->getnext($vbl);
+	}
+	return $this->_gettable_do_it($vbl, $parse_indexes, $textnode, $state);
     }
+    return 0;
+}
+
+sub _gettable_do_it() {
+    my ($this, $vbl, $parse_indexes, $textnode, $state) = @_;
+
+    my ($res);
+
+    $vbl = $_[$#_] if ($state->{'options'}{'callback'});
 
     while ($#$vbl > -1 && !$this->{ErrorNum}) {
-	if (($#$vbl + 1) % ($#$stopconds + 1) != 0) {
-	    print STDERR "ack: gettable results not appropriate\n";
-	    my @k = keys(%result_hash);
+	if (($#$vbl + 1) % ($#{$state->{'stopconds'}} + 1) != 0) {
+	    if ($vbl->[$#$vbl][2] ne 'ENDOFMIBVIEW') {
+		# unless it's an end of mib view we didn't get the
+		# proper number of results back.
+		print STDERR "ack: gettable results not appropriate\n";
+	    }
+	    my @k = keys(%{$state->{'result_hash'}});
 	    last if ($#k > -1);  # bail with what we have
 	    return;
 	}
 
-	$varbinds = [];
+	$state->{'varbinds'} = [];
 	my $newstopconds;
 
-	my $lastsetstart = ($repeatcount-1) * ($#$stopconds+1);
+	my $lastsetstart = ($state->{'repeatcount'}-1) * ($#{$state->{'stopconds'}}+1);
 
 	for (my $i = 0; $i <= $#$vbl; $i++) {
 	    my $row_oid = SNMP::translateObj($vbl->[$i][0]);
@@ -764,8 +804,10 @@ sub gettable {
 	    my $row_value = $vbl->[$i][2];
 	    my $row_type = $vbl->[$i][3];
 
-	    if ($row_oid =~ /^$stopconds->[$i % ($#$stopconds+1)]/ &&
-		$row_value ne 'ENDOFMIBVIEW') {
+	    if ($row_oid =~ 
+		/^$state->{'stopconds'}[$i % ($#{$state->{'stopconds'}}+1)]/ &&
+		$row_value ne 'ENDOFMIBVIEW' ){
+
 		if ($row_type eq "OBJECTID") {
 
 		    # If the value returned is an OID, translate this
@@ -777,59 +819,100 @@ sub gettable {
 
 		# Place the results in a hash
 
-		$result_hash{$row_index}{$row_text} = $row_value;
+		$state->{'result_hash'}{$row_index}{$row_text} = $row_value;
 
 		# continue past this next time
 		if ($i >= $lastsetstart) {
-		    push @$newstopconds, $stopconds->[$i%($#$stopconds+1)];
-		    push @$varbinds,[$vbl->[$i][0],$vbl->[$i][1]];
+		    push @$newstopconds,
+		      $state->{'stopconds'}->[$i%($#{$state->{'stopconds'}}+1)];
+		    push @{$state->{'varbinds'}},[$vbl->[$i][0],$vbl->[$i][1]];
 		}
 	    }
 	}
 	if ($#$newstopconds == -1) {
 	    last;
 	}
-	if ($#$varbinds == -1) {
+	if ($#{$state->{'varbinds'}} == -1) {
 	    print "gettable ack.  shouldn't get here\n";
 	}
-	$vbl = $varbinds;
-	$stopconds = $newstopconds;
+	$vbl = $state->{'varbinds'};
+	$state->{'stopconds'} = $newstopconds;
 
-	if ($this->{Version} > 1 && !$options->{'nogetbulk'}) {
-	    $res = $this->getbulk(0, $repeatcount, $vbl);
+        #
+        # if we've been configured with a callback, then call the
+        # sub-functions with a callback to our own "next" processing
+        # function (_gettable_do_it).  or else call the blocking method and
+        # call the next processing function ourself.
+        #
+	if ($state->{'options'}{'callback'}) {
+	    if ($this->{Version} > 1 && !$state->{'options'}{'nogetbulk'}) {
+		$res = $this->getbulk(0, $state->{'repeatcount'}, $vbl,
+				      [\&_gettable_do_it, $this, $vbl,
+				       $parse_indexes, $textnode, $state]);
+	    } else {
+		$res = $this->getnext($vbl,
+				      [\&_gettable_do_it, $this, $vbl,
+				       $parse_indexes, $textnode, $state]);
+	    }
+	    return;
 	} else {
-	    $res = $this->getnext($vbl);
+	    if ($this->{Version} > 1 && !$state->{'options'}{'nogetbulk'}) {
+		$res = $this->getbulk(0, $state->{'repeatcount'}, $vbl);
+	    } else {
+		$res = $this->getnext($vbl);
+	    }
 	}
     }
 
-    # calculate indexes
+    # finish up
+    _gettable_end_routine($state, $parse_indexes, $textnode);
+
+    # return the hash if no callback was specified
+    if (!$state->{'options'}{'callback'}) {
+	return($state->{'result_hash'});
+    }
+
+    #
+    # if they provided a callback, call it
+    #   (if an array pass the args as well)
+    #
+    if (ref($state->{'options'}{'callback'}) eq 'ARRAY') {
+	my $code = shift @{$state->{'options'}{'callback'}};
+	$code->(@{$state->{'options'}{'callback'}}, $state->{'result_hash'});
+    } else {
+	$state->{'options'}{'callback'}->($state->{'result_hash'});
+    }
+}
+
+sub _gettable_end_routine {
+    my ($state, $parse_indexes, $textnode) = @_;
     if ($parse_indexes) {
 	my @indexes = @{$SNMP::MIB{$textnode}{'children'}[0]{'indexes'}};
 	my $i;
-	foreach my $trow (keys(%result_hash)) {
-	    my $noid = new NetSNMP::OID($columns[0] . "." . $trow);
+	foreach my $trow (keys(%{$state->{'result_hash'}})) {
+	    my $noid = new NetSNMP::OID($state->{'columns'}[0] . "." . $trow);
 	    if (!$noid) {
-		print STDERR "***** ERROR parsing $columns[0].$trow MIB OID\n";
+		print STDERR "***** ERROR parsing $state->{'columns'}[0].$trow MIB OID\n";
 		next;
 	    }
 	    my $nindexes = $noid->get_indexes();
 	    if (!$nindexes || ref($nindexes) ne 'ARRAY' ||
 		$#indexes != $#$nindexes) {
-		print STDERR "***** ERROR parsing $columns[0].$trow MIB indexes:\n  $noid => " . ref($nindexes) . "\n   [should be an ARRAY]\n  expended # indexes = $#indexes\n";
+		print STDERR "***** ERROR parsing $state->{'columns'}[0].$trow MIB indexes:\n  $noid => " . ref($nindexes) . "\n   [should be an ARRAY]\n  expended # indexes = $#indexes\n";
 		if (ref($nindexes) eq 'ARRAY') {
-		    print STDERR "***** ERROR parsing $columns[0].$trow MIB indexes: " . ref($nindexes) . " $#indexes $#$nindexes\n";
+		    print STDERR "***** ERROR parsing $state->{'columns'}[0].$trow MIB indexes: " . ref($nindexes) . " $#indexes $#$nindexes\n";
 		}
 		next;
 	    }
 
 	    for ($i = 0; $i <= $#indexes; $i++) {
-		$result_hash{$trow}{$indexes[$i]} = $nindexes->[$i];
+		$state->{'result_hash'}{$trow}{$indexes[$i]} = $nindexes->[$i];
 	    }
 	}
     }
-
-    return(\%result_hash);
 }
+no strict;
+
 
 sub fget {
    my $this = shift;
@@ -1464,13 +1547,13 @@ default 'DES', privacy protocol [DES, AES] (v3)
 
 default <none>, privacy passphrase (v3)
 
-=item authMasterKey
+=item AuthMasterKey
 
-=item privMasterKey
+=item PrivMasterKey
 
-=item authLocalizedKey
+=item AuthLocalizedKey
 
-=item privLocalizedKey
+=item PrivLocalizedKey
 
 Directly specified SNMPv3 USM user keys (used if you want to specify
 the keys instead of deriving them from a password as above).
@@ -1533,6 +1616,14 @@ creation. this setting controls how <tags> are parsed.  setting to
 0 causes a regular lookup.  setting to 1 causes a regular expression 
 match (defined as -Ib in snmpcmd) and setting to 2 causes a random 
 access lookup (defined as -IR in snmpcmd).
+
+=item NonIncreasing
+
+defaults to the value of SNMP::non_increasing at time of session
+creation. this setting controls if a non-increasing OID during
+bulkwalk will causes an error. setting to 0 causes the default
+behaviour (which may, in very badly performing agents, result in a never-ending loop).
+setting to 1 causes an error (OID not increasing) when this error occur.
 
 =item ErrorStr
 
@@ -1741,6 +1832,34 @@ Force the use of GETNEXT rather than GETBULK.  (always true for
 SNMPv1, as it doesn't have GETBULK anyway).  Some agents are great
 implementers of GETBULK and this allows you to force the use of
 GETNEXT oprations instead.
+
+=item callback => \&subroutine
+
+=item callback => [\&subroutine, optarg1, optarg2, ...]
+
+If a callback is specified, gettable will return quickly without
+returning results.  When the results are finally retrieved the
+callback subroutine will be called (see the other sections defining
+callback behaviour and how to make use of SNMP::MainLoop which is
+required fro this to work).  An additional argument of the normal hash
+result will be added to the callback subroutine arguments.
+
+Note 1: internally, the gettable function uses it's own callbacks
+which are passed to getnext/getbulk as appropriate.
+
+Note 2: callback support is only available in the SNMP module version
+5.04 and above.  To test for this in code intending to support both
+versions prior to 5.04 and and 5.04 and up, the following should work:
+
+  if ($response = $sess->gettable('ifTable', callback => \&my_sub)) {
+      # got a response, gettable doesn't support callback
+      my_sub($response);
+      $no_mainloop = 1;
+  }
+
+Deciding on whether to use SNMP::MainLoop is left as an excersize to
+the reader since it depends on whether your code uses other callbacks
+as well.
 
 =back
 
@@ -1980,7 +2099,7 @@ the current version specifier (e.g., 3.1.0)
 default '1', set to 0 to disable automatic reading
 of the MIB upon session creation. set to non-zero
 to call initMib at session creation which will result
-in MIB loading according to UCD env. variables (see
+in MIB loading according to Net-SNMP env. variables (see
 man mib_api)
 
 =item $SNMP::verbose
@@ -2169,7 +2288,7 @@ allows dynamic parsing of the mib and explicit
 specification of mib file independent of enviroment
 variables. called with no args acts like initMib,
 loading MIBs indicated by environment variables (see
-ucd mib_api docs). passing non-zero second arg
+Net-SNMP mib_api docs). passing non-zero second arg
 forces previous mib to be freed and replaced
 B<(Note: second arg not working since freeing previous
 Mib is more involved than before)>.
@@ -2179,7 +2298,7 @@ Mib is more involved than before)>.
 calls library init_mib function if Mib not already
 loaded - does nothing if Mib already loaded. will
 parse directories and load modules according to
-environment variables described in UCD documentations.
+environment variables described in Net-SNMP documentations.
 (see man mib_api, MIBDIRS, MIBS, MIBFILE(S), etc.)
 
 =item &SNMP::addMibDirs(<dir>,...)
@@ -2289,10 +2408,10 @@ SNMP::TrapSession::trap
 If problems occur there are number areas to look at to narrow down the
 possibilities.
 
-The first step should be to test the UCD SNMP installation
+The first step should be to test the Net-SNMP installation
 independently from the Perl5 SNMP interface.
 
-Try running the apps from the UCD SNMP distribution.
+Try running the apps from the Net-SNMP distribution.
 
 Make sure your agent (snmpd) is running and properly configured with
 read-write access for the community you are using.
@@ -2300,16 +2419,16 @@ read-write access for the community you are using.
 Ensure that your MIBs are installed and enviroment variables are set
 appropriately (see man mib_api)
 
-Be sure to remove old ucd-snmp installations and ensure headers and
+Be sure to remove old net-snmp installations and ensure headers and
 libraries from old CMU installations are not being used by mistake.
 
 If the problem occurs during compilation/linking check that the snmp
-library being linked is actually the UCD SNMP library (there have been
+library being linked is actually the Net-SNMP library (there have been
 name conflicts with existing snmp libs).
 
 Also check that the header files are correct and up to date.
 
-Sometimes compiling the UCD SNMP library with
+Sometimes compiling the Net-SNMP library with
 'position-independent-code' enabled is required (HPUX specifically).
 
 If you cannot resolve the problem you can post to
@@ -2317,7 +2436,7 @@ comp.lang.perl.modules or
 net-snmp-users@net-snmp-users@lists.sourceforge.net
 
 please give sufficient information to analyze the problem (OS type,
-versions for OS/Perl/UCD/compiler, complete error output, etc.)
+versions for OS/Perl/Net-SNMP/compiler, complete error output, etc.)
 
 =head1 Acknowledgements
 

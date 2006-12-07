@@ -217,7 +217,7 @@ sub HasSSL {
 	return undef;
     }
     while (<C>) {
-	$has_ssl++, last if /^\s*#define\s+USE_OPENSSL/;
+	$has_ssl++, last if /^\s*#define\s+NETSNMP_USE_OPENSSL/;
     }
     close C;
     return $has_ssl;
@@ -328,10 +328,10 @@ sub Check_Version {
 	    # version formatting of net-snmp itself.
 	    $perlver =~ s/(\.\d{5}).*/\1/;
 	    $perlver =~ s/0*$//;
-	    if ($srcfloat ne $perlver) {
+	    if ($srcver ne $perlver) {
 		if (!$foundversion) {
 		    print STDERR "ERROR:
-Net-SNMP installed version: $srcver => $srcfloat
+Net-SNMP installed version: $srcver
 Perl Module Version:        $perlver
 
 These versions must match for perfect support of the module.  It is possible
