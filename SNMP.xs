@@ -915,7 +915,7 @@ int    best_guess;
       }
    }
  done:
-   if (iid && *iid) __concat_oid_str(oid_arr, oid_arr_len, iid);
+   if (iid && *iid && oid_arr_len) __concat_oid_str(oid_arr, oid_arr_len, iid);
    return(rtp);
 }
 /* searches down the mib tree for the given oid
@@ -2080,7 +2080,7 @@ _bulkwalk_recv_pdu(walk_context *context, netsnmp_pdu *pdu)
       if ((context->pkts_exch > 1) && (pix < context->repeaters)) {
 	 if (__oid_cmp(vars->name, vars->name_length,
 				   context->reqbase[pix].last_oid,
-				   context->reqbase[pix].last_len) == 0)
+				   context->reqbase[pix].last_len) <= 0)
 	 {
             if (check) 
             {
@@ -4709,7 +4709,7 @@ snmp_translate_obj(var,mode,use_long,auto_init,best_guess,include_module_name)
            str_buf_temp[0] = '\0';
 
 	   if (auto_init)
-	     netsnmp_init_mib(); // vestigial 
+	     netsnmp_init_mib(); /* vestigial */
 
            /* Save old output format and set to FULL so long_names works */
            old_format = netsnmp_ds_get_int(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_OID_OUTPUT_FORMAT);

@@ -1,6 +1,6 @@
 #!./perl
 #
-# $Id: bulkwalk.t,v 5.12 2006/11/13 23:49:43 tanders Exp $
+# $Id: bulkwalk.t 15551 2006-11-13 23:50:20Z tanders $
 #
 # Test bulkwalk functionality.
 
