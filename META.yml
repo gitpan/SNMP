@@ -1,7 +1,7 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         SNMP
-version:      5.0400001
+version:      5.0401
 version_from: SNMP.pm
 installdirs:  site
 requires:
