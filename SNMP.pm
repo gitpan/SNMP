@@ -7,7 +7,10 @@
 #     modify it under the same terms as Perl itself.
 
 package SNMP;
-$VERSION = '5.0401';   # current release version number
+$VERSION = '5.0404';   # current release version number
+
+use strict;
+use warnings;
 
 require Exporter;
 require DynaLoader;
@@ -46,11 +49,12 @@ use NetSNMP::default_store (':all');
 );
 
 sub AUTOLOAD {
+    no strict;
     # This AUTOLOAD is used to 'autoload' constants from the constant()
     # XS function.  If a constant is not found then control is passed
     # to the AUTOLOAD in AutoLoader.
     my($val,$pack,$file,$line);
-    local($constname);
+    my $constname;
     ($constname = $AUTOLOAD) =~ s/.*:://;
     # croak "&$module::constant not defined" if $constname eq 'constant';
     $val = constant($constname, @_ ? $_[0] : 0);
@@ -74,15 +78,22 @@ bootstrap SNMP;
 # Preloaded methods go here.
 
 # Package variables
-tie $SNMP::debugging, SNMP::DEBUGGING;
-tie $SNMP::debug_internals, SNMP::DEBUG_INTERNALS;
-tie $SNMP::dump_packet, SNMP::DUMP_PACKET;
-tie %SNMP::MIB, SNMP::MIB;
-tie $SNMP::save_descriptions, SNMP::MIB::SAVE_DESCR;
-tie $SNMP::replace_newer, SNMP::MIB::REPLACE_NEWER;
-tie $SNMP::mib_options, SNMP::MIB::MIB_OPTIONS;
+tie $SNMP::debugging,         'SNMP::DEBUGGING';
+tie $SNMP::debug_internals,   'SNMP::DEBUG_INTERNALS';
+tie $SNMP::dump_packet,       'SNMP::DUMP_PACKET';
+tie %SNMP::MIB,               'SNMP::MIB';
+tie $SNMP::save_descriptions, 'SNMP::MIB::SAVE_DESCR';
+tie $SNMP::replace_newer,     'SNMP::MIB::REPLACE_NEWER';
+tie $SNMP::mib_options,       'SNMP::MIB::MIB_OPTIONS';
 
 %SNMP::V3_SEC_LEVEL_MAP = (noAuthNoPriv => 1, authNoPriv => 2, authPriv =>3);
+
+use vars qw(
+  $auto_init_mib $use_long_names $use_sprint_value $use_enums
+  $use_numeric %MIB $verbose $debugging $dump_packet $save_descriptions
+  $best_guess $non_increasing $replace_newer %session_params
+  $debug_internals $mib_options
+);
 
 $auto_init_mib = 1; # enable automatic MIB loading at session creation time
 $use_long_names = 0; # non-zero to prefer longer mib textual identifiers rather
@@ -641,8 +652,6 @@ sub get {
 }
 
 
-use strict;
-
 my $have_netsnmp_oid = eval { require NetSNMP::OID; };
 sub gettable {
 
@@ -685,7 +694,7 @@ sub gettable {
 	    if ($parse_indexes) {
 		# get indexes
 		my @indexes =
-		  @{$SNMP::MIB{$textnode}{'children'}[0]{'indexes'}};
+		  @{$SNMP::MIB{$textnode}{'children'}[0]{'indexes'} || [] };
 		# quick translate into a hash
 		map { $indexes{$_} = 1; } @indexes;
 	    }
@@ -701,7 +710,8 @@ sub gettable {
 		# some tables are only indexes, and we need to walk at
 		# least one column.  We pick the last.
 		push @{$state->{'columns'}}, $root_oid . ".1." .
-		  $children->[$#$children]{'subID'};
+		  $children->[$#$children]{'subID'}
+		  if ref($state) eq 'HASH' and ref($children) eq 'HASH';
 	    }
 	}
     } else {
@@ -731,7 +741,7 @@ sub gettable {
     $vbl = $state->{'varbinds'};
 	
     my $repeatcount;
-    if ($this->{Version} == 1 || $state->{'options'}{nogetbulk}) {
+    if ($this->{Version} eq '1' || $state->{'options'}{nogetbulk}) {
 	$state->{'repeatcount'} = 1;
     } elsif ($state->{'options'}{'repeat'}) {
 	$state->{'repeatcount'} = $state->{'options'}{'repeat'};
@@ -753,7 +763,7 @@ sub gettable {
     # call the next processing function ourself.
     #
     if ($state->{'options'}{'callback'}) {
-	if ($this->{Version} > 1 && !$state->{'options'}{'nogetbulk'}) {
+	if ($this->{Version} ne '1' && !$state->{'options'}{'nogetbulk'}) {
 	    $res = $this->getbulk(0, $state->{'repeatcount'}, $vbl,
 				  [\&_gettable_do_it, $this, $vbl,
 				   $parse_indexes, $textnode, $state]);
@@ -763,7 +773,7 @@ sub gettable {
 				   $parse_indexes, $textnode, $state]);
 	}
     } else {
-	if ($this->{Version} > 1 && !$state->{'options'}{'nogetbulk'}) {
+	if ($this->{Version} ne '1' && !$state->{'options'}{'nogetbulk'}) {
 	    $res = $this->getbulk(0, $state->{'repeatcount'}, $vbl);
 	} else {
 	    $res = $this->getnext($vbl);
@@ -845,7 +855,7 @@ sub _gettable_do_it() {
         # call the next processing function ourself.
         #
 	if ($state->{'options'}{'callback'}) {
-	    if ($this->{Version} > 1 && !$state->{'options'}{'nogetbulk'}) {
+	    if ($this->{Version} ne '1' && !$state->{'options'}{'nogetbulk'}) {
 		$res = $this->getbulk(0, $state->{'repeatcount'}, $vbl,
 				      [\&_gettable_do_it, $this, $vbl,
 				       $parse_indexes, $textnode, $state]);
@@ -856,7 +866,7 @@ sub _gettable_do_it() {
 	    }
 	    return;
 	} else {
-	    if ($this->{Version} > 1 && !$state->{'options'}{'nogetbulk'}) {
+	    if ($this->{Version} ne '1' && !$state->{'options'}{'nogetbulk'}) {
 		$res = $this->getbulk(0, $state->{'repeatcount'}, $vbl);
 	    } else {
 		$res = $this->getnext($vbl);
@@ -911,7 +921,6 @@ sub _gettable_end_routine {
 	}
     }
 }
-no strict;
 
 
 sub fget {
@@ -934,8 +943,8 @@ sub fget {
 
    SNMP::_get($this, $this->{RetryNoSuch}, $varbind_list_ref, $cb);
 
-   foreach $varbind (@$varbind_list_ref) {
-     $sub = $this->{VarFormats}{$varbind->[$SNMP::Varbind::tag_f]} ||
+   foreach my $varbind (@$varbind_list_ref) {
+     my $sub = $this->{VarFormats}{$varbind->[$SNMP::Varbind::tag_f]} ||
 	 $this->{TypeFormats}{$varbind->[$SNMP::Varbind::type_f]};
      &$sub($varbind) if defined $sub;
      push(@res, $varbind->[$SNMP::Varbind::val_f]);
@@ -987,8 +996,8 @@ sub fgetnext {
 
    SNMP::_getnext($this, $varbind_list_ref, $cb);
 
-   foreach $varbind (@$varbind_list_ref) {
-     $sub = $this->{VarFormats}{$varbind->[$SNMP::Varbind::tag_f]} ||
+   foreach my $varbind (@$varbind_list_ref) {
+     my $sub = $this->{VarFormats}{$varbind->[$SNMP::Varbind::tag_f]} ||
 	 $this->{TypeFormats}{$varbind->[$SNMP::Varbind::type_f]};
      &$sub($varbind) if defined $sub;
      push(@res, $varbind->[$SNMP::Varbind::val_f]);
@@ -1067,7 +1076,7 @@ sub bulkwalk {
    return defined($cb) ? $res[0] : \@res;
 }
 
-%trap_type = (coldStart => 0, warmStart => 1, linkDown => 2, linkUp => 3,
+my %trap_type = (coldStart => 0, warmStart => 1, linkDown => 2, linkUp => 3,
 	      authFailure => 4, egpNeighborLoss => 5, specific => 6 );
 sub trap {
 # (v1) enterprise, agent, generic, specific, uptime, <vars>
@@ -1159,7 +1168,7 @@ sub inform {
 }
 
 package SNMP::TrapSession;
-@ISA = ('SNMP::Session');
+@SNMP::TrapSession::ISA = ('SNMP::Session');
 
 sub new {
    my $type = shift;
@@ -1174,11 +1183,11 @@ sub new {
 
 package SNMP::Varbind;
 
-$tag_f = 0;
-$iid_f = 1;
-$val_f = 2;
-$type_f = 3;
-$time_f = 4;
+my $tag_f = 0;
+my $iid_f = 1;
+my $val_f = 2;
+my $type_f = 3;
+my $time_f = 4;
 
 sub new {
    my $type = shift;
@@ -1300,7 +1309,7 @@ sub FETCH {
     my $key = shift;
 
     if (!defined $this->{$key}) {
-	tie(%{$this->{$key}}, SNMP::MIB::NODE, $key) or return undef;
+	tie(%{$this->{$key}}, 'SNMP::MIB::NODE', $key) or return undef;
     }
     $this->{$key};
 }

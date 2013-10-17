@@ -35,4 +35,3 @@ t/conftest.conf
 t/snmptest.conf
 TODO
 typemap
-META.yml                                 Module meta-data (added by MakeMaker)

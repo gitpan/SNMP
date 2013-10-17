@@ -234,7 +234,6 @@ __libraries_init(char *appname)
         have_inited = 1;
 
         snmp_set_quick_print(1);
-        snmp_enable_stderrlog();
         init_snmp(appname);
     
         netsnmp_ds_set_boolean(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_DONT_BREAKDOWN_OIDS, 1);
@@ -470,14 +469,16 @@ int flag;
            if (flag == USE_ENUMS) {
               for(ep = tp->enums; ep; ep = ep->next) {
                  if (ep->value == *var->val.integer) {
-                    strcpy(buf, ep->label);
+                    strncpy(buf, ep->label, buf_len);
+                    buf[buf_len-1] = '\0';
                     len = strlen(buf);
                     break;
                  }
               }
            }
            if (!len) {
-              sprintf(buf,"%ld", *var->val.integer);
+              snprintf(buf, buf_len, "%ld", *var->val.integer);
+              buf[buf_len-1] = '\0';
               len = strlen(buf);
            }
            break;
@@ -486,21 +487,25 @@ int flag;
         case ASN_COUNTER:
         case ASN_TIMETICKS:
         case ASN_UINTEGER:
-           sprintf(buf,"%lu", (unsigned long) *var->val.integer);
+           snprintf(buf, buf_len, "%lu", (unsigned long) *var->val.integer);
+           buf[buf_len-1] = '\0';
            len = strlen(buf);
            break;
 
         case ASN_OCTET_STR:
         case ASN_OPAQUE:
-           memcpy(buf, (char*)var->val.string, var->val_len);
            len = var->val_len;
+           if ( len > buf_len )
+               len = buf_len;
+           memcpy(buf, (char*)var->val.string, len);
            break;
 
         case ASN_IPADDRESS:
-          ip = (u_char*)var->val.string;
-          sprintf(buf, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-          len = strlen(buf);
-          break;
+           ip = (u_char*)var->val.string;
+           snprintf(buf, buf_len, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+           buf[buf_len-1] = '\0';
+           len = strlen(buf);
+           break;
 
         case ASN_NULL:
            break;
@@ -512,14 +517,14 @@ int flag;
           break;
 
 	case SNMP_ENDOFMIBVIEW:
-          sprintf(buf,"%s", "ENDOFMIBVIEW");
-	  break;
+           snprintf(buf, buf_len, "%s", "ENDOFMIBVIEW");
+	   break;
 	case SNMP_NOSUCHOBJECT:
-	  sprintf(buf,"%s", "NOSUCHOBJECT");
-	  break;
+	   snprintf(buf, buf_len, "%s", "NOSUCHOBJECT");
+	   break;
 	case SNMP_NOSUCHINSTANCE:
-	  sprintf(buf,"%s", "NOSUCHINSTANCE");
-	  break;
+	   snprintf(buf, buf_len, "%s", "NOSUCHINSTANCE");
+	   break;
 
         case ASN_COUNTER64:
 #ifdef NETSNMP_WITH_OPAQUE_SPECIAL_TYPES
@@ -538,19 +543,19 @@ int flag;
 #endif
 
         case ASN_BIT_STR:
-            snprint_bitstring(buf, sizeof(buf), var, NULL, NULL, NULL);
+            snprint_bitstring(buf, buf_len, var, NULL, NULL, NULL);
             len = strlen(buf);
             break;
 #ifdef NETSNMP_WITH_OPAQUE_SPECIAL_TYPES
         case ASN_OPAQUE_FLOAT:
-	  if (var->val.floatVal)
-	    sprintf(buf,"%f", *var->val.floatVal);
-         break;
+           if (var->val.floatVal)
+              snprintf(buf, buf_len, "%f", *var->val.floatVal);
+           break;
          
         case ASN_OPAQUE_DOUBLE:
-	  if (var->val.doubleVal)
-	    sprintf(buf,"%f", *var->val.doubleVal);
-         break;
+           if (var->val.doubleVal)
+              snprintf(buf, buf_len, "%f", *var->val.doubleVal);
+           break;
 #endif
          
         case ASN_NSAP:
@@ -1334,6 +1339,7 @@ void *cb_data;
 
       sv_bless(varlist_ref, gv_stashpv("SNMP::VarList",0));
       for(vars = (pdu?pdu->variables:NULL); vars; vars = vars->next_variable) {
+         int local_getlabel_flag = getlabel_flag;
          varbind = newAV();
          varbind_ref = newRV_noinc((SV*)varbind);
          sv_bless(varbind_ref, gv_stashpv("SNMP::Varbind",0));
@@ -1349,10 +1355,10 @@ void *cb_data;
          if (__is_leaf(tp)) {
             type = tp->type;
          } else {
-            getlabel_flag |= NON_LEAF_NAME;
+            local_getlabel_flag |= NON_LEAF_NAME;
             type = __translate_asn_type(vars->type);
          }
-         __get_label_iid(str_buf,&label,&iid,getlabel_flag);
+         __get_label_iid(str_buf,&label,&iid,local_getlabel_flag);
          if (label) {
              av_store(varbind, VARBIND_TAG_F,
                       newSVpv(label, strlen(label)));
@@ -1389,6 +1395,8 @@ void *cb_data;
 
   case NETSNMP_CALLBACK_OP_TIMED_OUT:
     varlist_ref = &sv_undef;
+    sv_setpv(*err_str_svp, (char*)snmp_api_errstring(SNMPERR_TIMEOUT));
+    sv_setiv(*err_num_svp, SNMPERR_TIMEOUT);
     break;
   default:;
   } /* switch op */
@@ -2078,10 +2086,9 @@ _bulkwalk_recv_pdu(walk_context *context, netsnmp_pdu *pdu)
       ** easy enough to do, and will avoid confusion for the caller from mis-
       ** behaving agents (badly misbehaving... ;^).
       */
-      if ((context->pkts_exch > 1) && (pix < context->repeaters)) {
+      if (context->pkts_exch > 1) {
 	 if (__oid_cmp(vars->name, vars->name_length,
-				   context->reqbase[pix].last_oid,
-				   context->reqbase[pix].last_len) <= 0)
+                       expect->last_oid, expect->last_len) <= 0)
 	 {
             if (check) 
             {
@@ -2108,12 +2115,10 @@ _bulkwalk_recv_pdu(walk_context *context, netsnmp_pdu *pdu)
       ** variables in a completed request.  In order to maintain the correct
       ** ordering of which variables we expect to see in this packet, we must
       ** not set the ignore flags immediately.  It is done in bulkwalk_done().
-      ** XXX Can we use 'expect' instead of 'context->req_oids[pix]'?
       */
       if (context->oid_saved < context->non_reps) {
 	DBPRT(2, (DBOUT "   expected var %s (nonrepeater %d/%d)\n",
-		  __snprint_oid(context->req_oids[pix].req_oid,
-			 context->req_oids[pix].req_len),
+		  __snprint_oid(expect->req_oid, expect->req_len),
 		  pix, context->non_reps));
 	DBPRT(2, (DBOUT "   received var %s\n",
 		  __snprint_oid(vars->name, vars->name_length)));
@@ -2267,6 +2272,7 @@ _bulkwalk_recv_pdu(walk_context *context, netsnmp_pdu *pdu)
 static int
 _bulkwalk_finish(walk_context *context, int okay)
 {
+   dSP;
    int		npushed = 0;
    int		i;
    int		async = 0;
@@ -2277,9 +2283,23 @@ _bulkwalk_finish(walk_context *context, int okay)
 
    SV **err_str_svp = hv_fetch((HV*)SvRV(context->sess_ref), "ErrorStr", 8, 1);
    SV **err_num_svp = hv_fetch((HV*)SvRV(context->sess_ref), "ErrorNum", 8, 1);
+   
+   async = SvTRUE(context->perl_cb);
+
+   /* XXX
+      _bulkwalk_finish() was originally intended to be called from XS code, and
+      would extend the caller's stack with result. Later it was changed into
+      an asynchronous version that calls perl code instead. These two branches
+      differ significantly in how they treat perl stack. Due to these differences,
+      often implicit (f.ex. dMARK calls POPMARK ), it would be a good idea
+      to write two different procedures, _bulkwalk_finish_sync and _bulkwalk_finish_async
+      for cleaner separation. */
+
+   if (async) PUSHMARK(sp);
+
+   {
 
 #ifdef dITEMS
-   dSP;
    dMARK;
    dITEMS;
 #else
@@ -2287,14 +2307,12 @@ _bulkwalk_finish(walk_context *context, int okay)
    /* older perl versions don't declare dITEMS though and the
       following declars it but also uses dAXMARK instead of dMARK
       which is the bad popping version */
-   dSP;
    dMARK;
 
    /* err...  This is essentially what the newer dITEMS does */
    I32 items = sp - mark;
 #endif
 
-   async = SvTRUE(context->perl_cb);
 
    /* Successfully completed the bulkwalk.  For synchronous calls, push each
    ** of the request value arrays onto the stack, and return the number of
@@ -2365,6 +2383,10 @@ _bulkwalk_finish(walk_context *context, int okay)
       if (!async) {
 	 XPUSHs(&sv_undef);
 	 npushed = 1;
+      } else {
+          for (i = 0; i < context->nreq_oids; i++) {
+              sv_2mortal((SV *) (context->req_oids[i].vars));
+          }
       }
    }
 
@@ -2404,7 +2426,7 @@ _bulkwalk_finish(walk_context *context, int okay)
    DBPRT(2,(DBOUT "Free() context 0x%p\n", context));
    Safefree(context);
    return npushed;
-}
+}}
 
 /* End of bulkwalk support routines */
 
@@ -2950,7 +2972,7 @@ snmp_read_module(module)
         if (!strcmp(module,"ALL")) {
            read_all_mibs();
         } else {
-           read_module(module);
+           netsnmp_read_module(module);
         }
         if (get_tree_head()) {
            if (verbose) warn("Read %s\n", module);
@@ -3066,7 +3088,7 @@ snmp_set(sess_ref, varlist_ref, perl_callback)
                     res = __add_var_val_str(pdu, oid_arr, oid_arr_len,
 				     (varbind_val_f && SvOK(*varbind_val_f) ?
 				      SvPV(*varbind_val_f,na):NULL),
-				      (varbind_val_f && SvOK(*varbind_val_f) ?
+				      (varbind_val_f && SvPOK(*varbind_val_f) ?
 				       SvCUR(*varbind_val_f):0), type);
 
 		    if (verbose && res == FAILURE)
@@ -3317,6 +3339,7 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
               for(vars = (response?response->variables:NULL), varlist_ind = 0;
                   vars && (varlist_ind <= varlist_len);
                   vars = vars->next_variable, varlist_ind++) {
+                 int local_getlabel_flag = getlabel_flag;
                  varbind_ref = av_fetch(varlist, varlist_ind, 0);
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
@@ -3335,10 +3358,10 @@ snmp_get(sess_ref, retry_nosuch, varlist_ref, perl_callback)
                     if (__is_leaf(tp)) {
                        type = tp->type;
                     } else {
-                       getlabel_flag |= NON_LEAF_NAME;
+                       local_getlabel_flag |= NON_LEAF_NAME;
                        type = __translate_asn_type(vars->type);
                     }
-                    __get_label_iid(str_buf,&label,&iid,getlabel_flag);
+                    __get_label_iid(str_buf,&label,&iid,local_getlabel_flag);
                     if (label) {
                         av_store(varbind, VARBIND_TAG_F,
                                  newSVpv(label, strlen(label)));
@@ -3555,6 +3578,7 @@ snmp_getnext(sess_ref, varlist_ref, perl_callback)
               for(vars = (response?response->variables:NULL), varlist_ind = 0;
                   vars && (varlist_ind <= varlist_len);
                   vars = vars->next_variable, varlist_ind++) {
+                 int local_getlabel_flag = getlabel_flag;
                  varbind_ref = av_fetch(varlist, varlist_ind, 0);
                  if (SvROK(*varbind_ref)) {
                     varbind = (AV*) SvRV(*varbind_ref);
@@ -3580,10 +3604,10 @@ snmp_getnext(sess_ref, varlist_ref, perl_callback)
                     if (__is_leaf(tp)) {
                        type = tp->type;
                     } else {
-                       getlabel_flag |= NON_LEAF_NAME;
+                       local_getlabel_flag |= NON_LEAF_NAME;
                        type = __translate_asn_type(vars->type);
                     }
-                    __get_label_iid(str_buf,&label,&iid,getlabel_flag);
+                    __get_label_iid(str_buf,&label,&iid,local_getlabel_flag);
                     if (label) {
                         av_store(varbind, VARBIND_TAG_F,
                                  newSVpv(label, strlen(label)));
@@ -3793,6 +3817,7 @@ snmp_getbulk(sess_ref, nonrepeaters, maxrepetitions, varlist_ref, perl_callback)
                   vars;
                   vars = vars->next_variable) {
 
+                    int local_getlabel_flag = getlabel_flag;
                     varbind = (AV*) newAV();
                     *str_buf = '.';
                     *(str_buf+1) = '\0';
@@ -3809,10 +3834,10 @@ snmp_getbulk(sess_ref, nonrepeaters, maxrepetitions, varlist_ref, perl_callback)
                     if (__is_leaf(tp)) {
                        type = tp->type;
                     } else {
-                       getlabel_flag |= NON_LEAF_NAME;
+                       local_getlabel_flag |= NON_LEAF_NAME;
                        type = __translate_asn_type(vars->type);
                     }
-                    __get_label_iid(str_buf,&label,&iid,getlabel_flag);
+                    __get_label_iid(str_buf,&label,&iid,local_getlabel_flag);
                     if (label) {
                         av_store(varbind, VARBIND_TAG_F,
                                  newSVpv(label, strlen(label)));
@@ -3965,7 +3990,7 @@ snmp_bulkwalk(sess_ref, nonrepeaters, maxrepetitions, varlist_ref,perl_callback)
 	   if (context->req_oids == NULL) {
 	      sprintf(str_buf, "Newz(req_oids) failed (%s)", strerror(errno));
 	      if (verbose)
-	         warn(str_buf);
+	         warn("%s", str_buf);
 	      sv_setpv(*err_str_svp, str_buf);
 	      sv_setiv(*err_num_svp, SNMPERR_MALLOC);
 	      goto err;
@@ -4260,7 +4285,7 @@ snmp_trapV1(sess_ref,enterprise,agent,generic,specific,uptime,varlist_ref)
                     res = __add_var_val_str(pdu, oid_arr, oid_arr_len,
                                   (varbind_val_f && SvOK(*varbind_val_f) ?
                                    SvPV(*varbind_val_f,na):NULL),
-                                  (varbind_val_f && SvOK(*varbind_val_f) ?
+                                  (varbind_val_f && SvPOK(*varbind_val_f) ?
                                    SvCUR(*varbind_val_f):0),
                                   type);
 
@@ -4418,7 +4443,7 @@ snmp_trapV2(sess_ref,uptime,trap_oid,varlist_ref)
                     res = __add_var_val_str(pdu, oid_arr, oid_arr_len,
                                   (varbind_val_f && SvOK(*varbind_val_f) ?
                                    SvPV(*varbind_val_f,na):NULL),
-                                  (varbind_val_f && SvOK(*varbind_val_f) ?
+                                  (varbind_val_f && SvPOK(*varbind_val_f) ?
                                    SvCUR(*varbind_val_f):0),
                                   type);
 
@@ -4557,7 +4582,7 @@ snmp_inform(sess_ref,uptime,trap_oid,varlist_ref,perl_callback)
                     res = __add_var_val_str(pdu, oid_arr, oid_arr_len,
                                   (varbind_val_f && SvOK(*varbind_val_f) ?
                                    SvPV(*varbind_val_f,na):NULL),
-                                  (varbind_val_f && SvOK(*varbind_val_f) ?
+                                  (varbind_val_f && SvPOK(*varbind_val_f) ?
                                    SvCUR(*varbind_val_f):0),
                                   type);
 
